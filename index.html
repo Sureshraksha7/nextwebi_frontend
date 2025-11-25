@@ -211,12 +211,18 @@
                 const resetButton = document.getElementById('reset-button');
                 
                 if (response && response.length > 0) {
-                    // *** FIX APPLIED HERE: Immediate Redirection ***
-                    // If nodes exist, immediately redirect to the flowchart without showing the warning screen.
-                    window.location.href = 'flowchart.html';
-                    return; 
+                    // Root exists: show a message and allow manual navigation via the button
+                    const setupContainer = document.getElementById('setup-form-container');
+                    const resetButton = document.getElementById('reset-button');
+
+                    setupContainer.innerHTML = `
+                        <p class="text-center text-gray-600 p-6">
+                            Root node already exists.  
+                            Use "Go to Flowchart" to view/edit it or "Reset Database" to start over.
+                        </p>
+                    `;
+                    resetButton.classList.remove('hidden');
                 } else {
-                    // No nodes, render the form
                     renderForm();
                     resetButton.classList.add('hidden');
                 }
