@@ -1,5 +1,6 @@
 // API Base URL (Assuming Flask is running locally on port 5000)
-const API_BASE_URL = "http://127.0.0.1:5000";
+// API Base URL (Render backend)
+const API_BASE_URL = "https://nextwebi-backend.onrender.com";
 
 // --- ZOOM/PAN STATE ---
 // Load saved scale from localStorage, default to 1.0 if none found
