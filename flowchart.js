@@ -2,7 +2,6 @@
 // API Base URL (Render backend)
 const API_BASE_URL = "https://nextwebi-backend.onrender.com";
 
-
 // --- ZOOM/PAN STATE ---
 // Load saved scale from localStorage, default to 1.0 if none found
 let currentScale = parseFloat(localStorage.getItem('currentScale')) || 1.0; 
@@ -10,16 +9,13 @@ const ZOOM_STEP = 0.15;
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 3.0;
 
-
 const vizWrapper = document.getElementById('tree-visualization');
 const contentWrapper = document.getElementById('tree-content-wrapper');
-
 
 // Global state for the zoom bar
 let isZoomBarVisible = false;
 const zoomBarContainer = document.getElementById('zoom-bar-container');
 const zoomToggleButton = document.getElementById('zoom-toggle-button');
-
 
 // Global state for the filter panel
 let isFilterPanelVisible = false;
@@ -28,23 +24,18 @@ const filterToggleButton = document.getElementById('filter-toggle-button');
 // --- END ZOOM/PAN STATE ---
 
 
-
 // State management
 let retryCount = 0;
 const MAX_RETRIES = 5;
 let nodeMap = {}; 
-let parentMap = {};
 let nodeStats = {}; // Cache for IN/OUT counts
 let stableRootId = null; // Stores the permanently stable root ID
-
 
 // Global state for focusing on a node after creation/update
 let nodeToFocusId = null; 
 
-
 // GLOBAL SET: Tracks nodes already rendered to prevent duplication/misplacement
 let renderedNodes = new Set(); 
-
 
 // Map status values to Tailwind classes for color coding
 const STATUS_CLASSES = {
@@ -54,14 +45,11 @@ const STATUS_CLASSES = {
 };
 const DEFAULT_STATUS = STATUS_CLASSES['New'];
 
-
 function getStatusClasses(status) {
     return STATUS_CLASSES[status] || DEFAULT_STATUS;
 }
 
-
 // --- Utility Functions ---
-
 
 function getStableColor(str) {
     let hash = 0;
@@ -73,19 +61,6 @@ function getStableColor(str) {
     const l = 85; 
     return `hsl(${h}, ${s}%, ${l}%)`;
 }
-
-function getBreadcrumbPath(nodeId) {
-    const parts = [];
-    let currentId = nodeId;
-    let guard = 0;
-    while (currentId && nodeMap[currentId] && guard < 1000) {
-        parts.push(nodeMap[currentId].name);
-        currentId = parentMap[currentId];
-        guard++;
-    }
-    return parts.reverse().join(' > ');
-}
-
 
 
 // --- Fetch Functions ---
@@ -105,7 +80,6 @@ async function fetchWithRetry(endpoint, options = {}) {
         retryCount = 0; 
         return await response.json();
 
-
     } catch (error) {
         if (retryCount < MAX_RETRIES) {
             retryCount++;
@@ -122,12 +96,10 @@ async function fetchWithRetry(endpoint, options = {}) {
     }
 }
 
-
 function showMessage(message, type) {
     const statusDiv = document.getElementById('status-message');
     statusDiv.textContent = message;
     statusDiv.classList.remove('hidden', 'bg-green-100', 'text-green-800', 'bg-red-100', 'text-red-800', 'bg-blue-100', 'text-blue-800');
-
 
     if (type === 'success') {
         statusDiv.classList.add('bg-green-100', 'text-green-800');
@@ -137,10 +109,8 @@ function showMessage(message, type) {
         statusDiv.classList.add('bg-blue-100', 'text-blue-800');
     }
 
-
     setTimeout(() => statusDiv.classList.add('hidden'), 5000);
 }
-
 
 // --- ZOOM/PAN Functions ---
 function applyZoom(scale) {
@@ -149,16 +119,13 @@ function applyZoom(scale) {
     localStorage.setItem('currentScale', currentScale.toFixed(2)); // Save the new scale
 }
 
-
 function zoomIn() {
     applyZoom(currentScale + ZOOM_STEP);
 }
 
-
 function zoomOut() {
     applyZoom(currentScale - ZOOM_STEP);
 }
-
 
 function resetZoom() {
     if (!contentWrapper.scrollWidth || !vizWrapper.clientWidth) {
@@ -179,7 +146,6 @@ function resetZoom() {
     vizWrapper.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
 }
 
-
 function toggleZoomBar() {
     isZoomBarVisible = !isZoomBarVisible;
     
@@ -194,7 +160,6 @@ function toggleZoomBar() {
         zoomBarContainer.classList.remove('translate-x-0');
         zoomBarContainer.classList.add('translate-x-full');
 
-
         // Hide after transition (Tailwind transition is 300ms)
         setTimeout(() => {
             zoomBarContainer.classList.add('hidden');
@@ -206,7 +171,6 @@ function toggleZoomBar() {
     // Re-create lucide icons after changing innerHTML
     window.lucide.createIcons();
 }
-
 
 // NEW FUNCTION: Focus/Center the view on a specific node
 function focusNode(nodeId) {
@@ -236,7 +200,6 @@ function focusNode(nodeId) {
             behavior: 'smooth'
         });
 
-
         // Optional: Highlight the node briefly
         targetElement.classList.add('shadow-outline', 'ring-4', 'ring-blue-500', 'ring-opacity-70', 'transition-all', 'duration-500');
         setTimeout(() => {
@@ -247,9 +210,7 @@ function focusNode(nodeId) {
 // --- END NEW FUNCTION ---
 
 
-
 // --- Filter Panel Functions ---
-
 
 function toggleFilterPanel() {
     isFilterPanelVisible = !isFilterPanelVisible;
@@ -264,7 +225,6 @@ function toggleFilterPanel() {
     window.lucide.createIcons();
 }
 
-
 // NEW: Determines if a node meets the current visibility criteria
 function isNodeVisible(nodeId) {
     const node = nodeMap[nodeId];
@@ -273,7 +233,6 @@ function isNodeVisible(nodeId) {
     // 1. Check Connection Filter
     const connectionFilter = document.getElementById('connection-filter-select').value;
     const stats = nodeStats[nodeId];
-
 
     if (stats) {
         if (connectionFilter === 'inbound' && stats.inboundCount === 0) {
@@ -287,13 +246,11 @@ function isNodeVisible(nodeId) {
     return true;
 }
 
-
 // NEW: Main Filter Application Logic (Called by input/select change)
 async function applyFilters() {
     const searchTerm = document.getElementById('search-filter-input').value.trim().toLowerCase();
     const connectionFilter = document.getElementById('connection-filter-select').value;
     const vizWrapper = document.getElementById('tree-content-wrapper');
-
 
     // --- 1. Handle Node Name Search ---
     if (searchTerm.length >= 2) {
@@ -314,7 +271,6 @@ async function applyFilters() {
         }
     }
 
-
     // --- 2. Handle Connection Filters & Reset to Full Tree ---
     if (connectionFilter === 'inbound' || connectionFilter === 'outbound') {
         await fetchAllStats();
@@ -326,7 +282,6 @@ async function applyFilters() {
     // --- 3. Reset to Full Tree ---
     loadAndRenderTree(); 
 }
-
 
 // NEW: Function to cache all node stats needed for connection filtering
 async function fetchAllStats() {
@@ -352,7 +307,6 @@ async function fetchAllStats() {
 }
 
 
-
 // --- Node Control Functions ---
 async function deleteNode(contentId, name) {
     closeDeleteConfirmModal();
@@ -364,7 +318,6 @@ async function deleteNode(contentId, name) {
         showMessage(`Failed to delete node: ${error.message}`, 'error');
     }
 }
-
 
 async function handleEditSubmit(e) {
     e.preventDefault();
@@ -388,10 +341,8 @@ async function handleEditSubmit(e) {
         nodeMap[contentId].description = newDescription;
         nodeMap[contentId].status = newStatus;
 
-
         nodeToFocusId = contentId;
         loadAndRenderVisuals(stableRootId); 
-
 
     } catch (error) {
         showMessage(`Failed to update node: ${error.message}`, 'error');
@@ -399,9 +350,7 @@ async function handleEditSubmit(e) {
     }
 }
 
-
 // --- Modal Control Functions ---
-
 
 // Handles link deletion from the Info Modal
 async function deleteRelationFromModal(parentId, childId, parentName, childName) {
@@ -409,10 +358,8 @@ async function deleteRelationFromModal(parentId, childId, parentName, childName)
         return;
     }
 
-
     closeInfoModal(); 
     showMessage(`Deleting link: ${parentName} → ${childName}...`, 'error');
-
 
     try {
         const options = {
@@ -435,7 +382,6 @@ async function deleteRelationFromModal(parentId, childId, parentName, childName)
     }
 }
 
-
 // UPDATED openInfoModal
 async function openInfoModal(nodeId) { 
     const node = nodeMap[nodeId]; 
@@ -451,7 +397,6 @@ async function openInfoModal(nodeId) {
     statusSpan.textContent = node.status;
     statusSpan.className = `px-2 py-0.5 rounded text-xs font-medium ${statusInfo.badge}`;
 
-
     // --- Initialize Click Stats Placeholder ---
     document.getElementById('inbound-count-display').textContent = 'Loading...';
     document.getElementById('inbound-details-display').innerHTML = '<p class="text-xs text-gray-600 italic mt-1">Fetching list...</p>';
@@ -459,7 +404,6 @@ async function openInfoModal(nodeId) {
     document.getElementById('outbound-details-display').innerHTML = '<p class="text-xs text-gray-600 italic mt-1">Fetching list...</p>';
     
     document.getElementById('info-modal').style.display = 'flex';
-
 
     // --- Fetch Click Stats and List Nodes (Non-blocking) ---
     try {
@@ -471,10 +415,8 @@ async function openInfoModal(nodeId) {
             const sourceNode = nodeMap[conn.sourceId];
             if (!sourceNode) return ''; // Skip if node data is missing
 
-
             // Source is Parent, Target (nodeId) is Child
-            const deleteAction = [deleteRelationFromModal('${sourceNode.contentId}', '${nodeId}', '${sourceNode.name}', '${node.name}')](cci:1://file:///c:/Users/sures/Documents/next%20webi/next_webi_tree/frontend/flowchart.js:353:0-381:1);
-
+            const deleteAction = `deleteRelationFromModal('${sourceNode.contentId}', '${nodeId}', '${sourceNode.name}', '${node.name}')`;
 
             return `
                 <div class="p-2 border border-gray-200 rounded-md bg-white mb-2 flex justify-between items-center">
@@ -490,7 +432,6 @@ async function openInfoModal(nodeId) {
             `;
         }).join('');
 
-
         document.getElementById('inbound-details-display').innerHTML = `<div class="mt-2 space-y-2">${inboundList || '<p class="text-xs text-gray-500 italic">No inbound connections recorded.</p>'}</div>`;
         
         // Fetch Outbound Stats
@@ -501,10 +442,8 @@ async function openInfoModal(nodeId) {
             const targetNode = nodeMap[conn.targetId];
             if (!targetNode) return ''; // Skip if node data is missing
 
-
             // Source (nodeId) is Parent, Target is Child
-            const deleteAction = [deleteRelationFromModal('${nodeId}', '${targetNode.contentId}', '${node.name}', '${targetNode.name}')](cci:1://file:///c:/Users/sures/Documents/next%20webi/next_webi_tree/frontend/flowchart.js:353:0-381:1);
-
+            const deleteAction = `deleteRelationFromModal('${nodeId}', '${targetNode.contentId}', '${node.name}', '${targetNode.name}')`;
 
             return `
                 <div class="p-2 border border-gray-200 rounded-md bg-white mb-2 flex justify-between items-center">
@@ -520,9 +459,7 @@ async function openInfoModal(nodeId) {
             `;
         }).join('');
 
-
         document.getElementById('outbound-details-display').innerHTML = `<div class="mt-2 space-y-2">${outboundList || '<p class="text-xs text-gray-500 italic">No outbound connections recorded.</p>'}</div>`;
-
 
     } catch (error) {
         document.getElementById('inbound-count-display').textContent = 'Error';
@@ -596,17 +533,14 @@ async function handleSearch() {
     try {
         const safeSearchTerm = searchTerm.replace(/\s/g, '_');
 
-
         // Use generic search – includes existing children
         const endpoint = `/node/search/${encodeURIComponent(safeSearchTerm)}`;
-
 
         const results = await fetchWithRetry(endpoint);
         statusMsg.textContent = '';
         document.getElementById('confirm-link-button').disabled = false;
         results.forEach(node => {
             nodeMap[node.contentId] = node;
-            const breadcrumb = getBreadcrumbPath(node.contentId);
             const listItem = document.createElement('li');
             listItem.className = 'flex items-start p-2 bg-white rounded-lg shadow-sm border border-gray-100';
             listItem.innerHTML = `
@@ -616,7 +550,6 @@ async function handleSearch() {
                     <span class="font-semibold text-sm text-gray-800">${node.name}</span> 
                     <span class="text-xs text-gray-500">(${node.status})</span><br>
                     <span class="text-xs text-gray-600 truncate block">${node.description || 'No description.'}</span>
-                    <span class="text-[10px] text-gray-400 truncate block mt-0.5">${breadcrumb}</span>
                 </label>
             `;
             resultsList.appendChild(listItem);
@@ -628,7 +561,6 @@ async function handleSearch() {
         document.getElementById('confirm-link-button').disabled = true;
     }
 }
-
 
 async function handleLinkSelected() {
     const parentId = document.getElementById('link-modal-parent-id').value;
@@ -650,10 +582,8 @@ async function handleLinkSelected() {
     const childId = checkbox.value;
     const childName = nodeMap[childId] ? nodeMap[childId].name : 'Unknown Node';
 
-
     try {
         showMessage(`1/2: Creating static link ${parentName} → ${childName}...`, 'info');
-
 
         // Step 1: Create or confirm the Static Relationship (idempotent)
         const relationOptions = {
@@ -661,7 +591,6 @@ async function handleLinkSelected() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ parentId: parentId, childId: childId })
         };
-
 
         try {
             await fetchWithRetry('/relation/create', relationOptions);
@@ -672,7 +601,6 @@ async function handleLinkSelected() {
             }
         }
 
-
         // Step 2: Record a "Click" (updates IN/OUT counters even for existing links)
         showMessage(`2/2: Recording initial click to update IN/OUT counters...`, 'info');
         const clickOptions = {
@@ -681,7 +609,6 @@ async function handleLinkSelected() {
             body: JSON.stringify({ sourceId: parentId, targetId: childId })
         };
         await fetchWithRetry('/link/click', clickOptions);
-
 
         nodesToUpdate.add(childId);
         successCount++;
@@ -698,12 +625,10 @@ async function handleLinkSelected() {
         // *** CRITICAL FIX: Use loadAndRenderTree for full hierarchy refresh ***
         loadAndRenderTree(); 
 
-
     } else {
         showMessage('No new links were successfully created.', 'error');
     }
 }
-
 
 // NEW FUNCTION: Applies colors to the IN/OUT counts based on value (0 or >0)
 function applyStatColors(nodeId) {
@@ -728,7 +653,6 @@ function applyStatColors(nodeId) {
 }
 
 
-
 // --- NEW FUNCTION: Fetch and Update Click Stats for a single node with retries ---
 async function updateNodeStats(nodeId) {
     const statsDiv = document.getElementById(`stats-${nodeId}`);
@@ -741,14 +665,12 @@ async function updateNodeStats(nodeId) {
     let outboundCount = 0;
     const MAX_STAT_RETRIES = 3; 
 
-
     // --- Fetch Stats with Retries ---
     for (let i = 0; i < MAX_STAT_RETRIES; i++) {
         try {
             // Attempt to fetch both inbound and outbound data
             const inboundData = await fetchWithRetry(`/inbound_stats/${encodeURIComponent(nodeId)}`);
             const outboundData = await fetchWithRetry(`/outbound_stats/${encodeURIComponent(nodeId)}`);
-
 
             inboundCount = inboundData.total_inbound_count;
             outboundCount = outboundData.total_outbound_count;
@@ -758,7 +680,6 @@ async function updateNodeStats(nodeId) {
             
             // If data is successfully fetched, break the loop
             break; 
-
 
         } catch (error) {
             // If it's the last attempt and it failed, log the error
@@ -785,25 +706,20 @@ async function updateNodeStats(nodeId) {
         </div>
     `;
 
-
     // --- Schedule CSS coloring after DOM update ---
     setTimeout(() => applyStatColors(nodeId), 50);
-
 
     // Recalculate horizontal lines after this node’s width may have changed
     setTimeout(updateHorizontalLines, 0);
 }
 
 
-
 // --- Node Rendering Logic ---
-
 
 /**
  * Renders a single node card and its children recursively.
  */
 // --- Node Rendering Logic ---
-
 
 /**
  * Renders a single node card and its children recursively.
@@ -811,46 +727,36 @@ async function updateNodeStats(nodeId) {
 function renderNode(nodeId, nodeMap, level = 0) {
     const node = nodeMap[nodeId];
 
-
     if (!node) {
         return '';
     }
-
 
     // --- CRITICAL FILTER CHECK ---
     if (!isNodeVisible(nodeId)) {
         return '';
     }
 
-
     const isAlreadyRendered = renderedNodes.has(nodeId);
-
 
     // Stop recursion if already drawn (prevents cross-linked nodes from shifting position)
     if (isAlreadyRendered) {
         return '';
     }
 
-
     renderedNodes.add(nodeId);
-
 
     const nodeName = node.name;
     const nodeIdStr = node.contentId;
     const statusClasses = getStatusClasses(node.status);
 
-
     // 1. Ensure stable order: Sort children IDs alphabetically for consistent sibling arrangement.
     const sortedChildren = (node.children || []).sort();
     const renderableChildrenIds = sortedChildren;
 
-
     const hasChildren = renderableChildrenIds.length > 0;
-
 
     // --- Schedule stat update after rendering ---
     setTimeout(() => updateNodeStats(nodeId), 100);
-
 
     // --- Children rendering ---
     let childrenHtml = '';
@@ -860,7 +766,6 @@ function renderNode(nodeId, nodeMap, level = 0) {
             .map(childId => renderNode(childId, nodeMap, level + 1))
             .join('');
 
-
         if (childNodesHtml.trim() !== '') {
             // Add a class if there is only one child wrapper
             const containerClass =
@@ -869,11 +774,9 @@ function renderNode(nodeId, nodeMap, level = 0) {
         }
     }
 
-
     // --- Icon Logic: All icons are black, no background circles ---
     let actionIcons = '';
     const iconStyle = `width="12" height="12" class="text-gray-800" stroke-width="2.5"`;
-
 
     actionIcons += `
         <button class="info-btn" onclick="openInfoModal('${nodeIdStr}')" title="View Description/Stats">
@@ -881,20 +784,17 @@ function renderNode(nodeId, nodeMap, level = 0) {
         </button>
     `;
 
-
     actionIcons += `
         <button class="edit-btn" onclick="openEditModal('${nodeIdStr}')" title="Edit Node Details">
             <svg data-lucide="pencil" ${iconStyle}></svg>
         </button>
     `;
 
-
     actionIcons += `
         <button class="search-btn" onclick="openSearchLinkModal('${nodeIdStr}', '${nodeName}')" title="Search & Link Nodes">
             <svg data-lucide="search" ${iconStyle}></svg>
         </button>
     `;
-
 
     // Conditional Delete Icon (Only on Leaf Nodes)
     if ((node.children || []).length === 0) {
@@ -905,7 +805,6 @@ function renderNode(nodeId, nodeMap, level = 0) {
         `;
     }
 
-
     // Add Child Icon
     actionIcons += `
         <button class="add-child-btn" onclick="openChildModal('${nodeIdStr}', '${nodeName}')" title="Add New Child">
@@ -913,11 +812,9 @@ function renderNode(nodeId, nodeMap, level = 0) {
         </button>
     `;
 
-
     // --- Node HTML structure: wrapper carries level-based line color ---
     const wrapperClass = hasChildren ? 'node-wrapper has-children' : 'node-wrapper';
     const levelColor = getLevelColor(level);
-
 
     return `
         <div class="${wrapperClass}" style="--line-color: ${levelColor};">
@@ -957,25 +854,12 @@ async function loadAndRenderTree() {
             return;
         }
 
-
         // 1. Map all nodes by ID
         nodeMap = {};
-        parentMap = {};
         
         response.forEach(node => {
             nodeMap[node.contentId] = { ...node }; 
         });
-
-        response.forEach(node => {
-            if (Array.isArray(node.children)) {
-                node.children.forEach(childId => {
-                    if (childId) {
-                        parentMap[childId] = node.contentId;
-                    }
-                });
-            }
-        });
-
 
         // 2. Identify the Root Node 
         let rootNodeId = null;
@@ -992,22 +876,18 @@ async function loadAndRenderTree() {
         // 3. Render visuals (uses loadAndRenderVisuals to handle zoom/focus logic)
         loadAndRenderVisuals(rootNodeId);
 
-
         // 4. Initial Scroll/Reset (Only if no focus node was requested by DML actions)
         if (!nodeToFocusId) {
             vizWrapper.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
         }
 
-
         showMessage(`Tree loaded successfully, starting from root: ${rootName}.`, 'success');
-
 
     } catch (error) {
         vizWrapper.innerHTML = '<p class="text-center text-red-500 italic p-10">Error loading graph. Check backend connection or console for details.</p>';
         console.error("Tree loading failed:", error);
     }
 }
-
 
 /**
  * Renders the visualization using current map (no fetch).
@@ -1017,7 +897,6 @@ function loadAndRenderVisuals(rootOverrideId = null) {
     const vizWrapper = document.getElementById('tree-content-wrapper');
     renderedNodes.clear(); 
     vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">Rendering tree...</p>';
-
 
     let rootNodeId = rootOverrideId || stableRootId || Object.keys(nodeMap)[0];
     if (!rootNodeId || !nodeMap[rootNodeId]) {
@@ -1033,13 +912,11 @@ function loadAndRenderVisuals(rootOverrideId = null) {
     // 1. Apply saved zoom level (retains user's zoom)
     applyZoom(currentScale); 
 
-
     // 2. Apply Focus after rendering
     if (nodeToFocusId) {
         focusNode(nodeToFocusId);
         nodeToFocusId = null; 
     }
-
 
     // 3. Explicitly trigger stat loading for all visible nodes
     for (const id in nodeMap) {
@@ -1053,7 +930,6 @@ function loadAndRenderVisuals(rootOverrideId = null) {
     setTimeout(updateHorizontalLines, 250); 
 }
 
-
 /**
  * Calculates the width for the horizontal line based on center-to-center distance.
  */
@@ -1064,20 +940,16 @@ function loadAndRenderVisuals(rootOverrideId = null) {
 //         // Skip if less than 2 children (single child case is handled by CSS class)
 //         if (children.length < 2) return; 
 
-
 //         // 1. Get the center of the first child's wrapper
 //         const firstChild = children[0];
 //         const firstCenter = firstChild.offsetLeft + (firstChild.offsetWidth / 2);
-
 
 //         // 2. Get the center of the last child's wrapper
 //         const lastChild = children[children.length - 1];
 //         const lastCenter = lastChild.offsetLeft + (lastChild.offsetWidth / 2);
 
-
 //         // 3. Calculate the line span (center-to-center)
 //         const lineSpan = lastCenter - firstCenter;
-
 
 //         // FIX: Use exactly the center-to-center distance. The CSS translateX will handle the final pixel perfect alignment.
 //         container.style.setProperty("--children-width", lineSpan + "px"); 
@@ -1085,25 +957,20 @@ function loadAndRenderVisuals(rootOverrideId = null) {
 // }
 
 
-
 // --- Event Listeners (FIXED) ---
 function updateHorizontalLines() {
     document.querySelectorAll(".tree-container").forEach(container => {
         const children = container.children;
 
-
         // No horizontal line needed if fewer than 2 children
         if (children.length < 2) return;
-
 
         const firstChild = children[0];
         const lastChild = children[children.length - 1];
 
-
         // Centers within the container’s coordinate system
         const start = firstChild.offsetLeft + (firstChild.offsetWidth / 2);
         const end   = lastChild.offsetLeft  + (lastChild.offsetWidth  / 2);
-
 
         container.style.setProperty("--line-start", start + "px");
         container.style.setProperty("--line-end",   end   + "px");
@@ -1117,7 +984,6 @@ function getLevelColor(level) {
     return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
 }
 
-
 // Use DOMContentLoaded to ensure elements are available for listeners
 document.addEventListener('DOMContentLoaded', () => {
     
@@ -1127,10 +993,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const parentId = document.getElementById('modal-parent-id').value;
         const parentName = nodeMap[parentId].name;
 
-
         const childName = document.getElementById('child-name').value.trim();
         const childDescription = document.getElementById('child-description').value.trim();
-
 
         closeChildModal(); 
         
@@ -1170,10 +1034,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-
     document.getElementById('edit-node-form').addEventListener('submit', handleEditSubmit);
     document.getElementById('modal-cancel-child').addEventListener('click', closeChildModal);
-
 
     document.getElementById('start-search-button').addEventListener('click', handleSearch);
     document.getElementById('confirm-link-button').addEventListener('click', handleLinkSelected);
@@ -1189,7 +1051,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initial load
     loadAndRenderTree();
 });
-
 
 // Expose functions globally for HTML-inline event handlers (like onclick)
 window.zoomIn = zoomIn;
