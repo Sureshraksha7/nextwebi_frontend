@@ -20,7 +20,9 @@
 <body>
 
     <div id="app" class="max-w-3xl mx-auto p-6 bg-white rounded-xl shadow-2xl border border-gray-100">
-        <h1 class="text-3xl font-bold text-gray-800 mb-6 border-b pb-2 text-center">Initial Knowledge Tree Setup</h1>
+        <h1 class="text-3xl font-bold text-gray-800 mb-6 border-b pb-2 text-center">
+            Initial Knowledge Tree Setup
+        </h1>
 
         <div id="status-message" class="hidden p-3 mb-4 rounded-lg text-sm transition-all duration-300"></div>
         
@@ -29,10 +31,14 @@
         </div>
 
         <div class="flex justify-end space-x-3 pt-4 border-t pt-4">
-            <button type="button" id="flowchart-link" onclick="window.location.href='flowchart.html'" class="py-2 px-4 text-indigo-600 font-semibold rounded-lg hover:bg-indigo-50 transition duration-150 border border-indigo-200">
+            <button type="button" id="flowchart-link"
+                    onclick="window.location.href='flowchart.html'"
+                    class="py-2 px-4 text-indigo-600 font-semibold rounded-lg hover:bg-indigo-50 transition duration-150 border border-indigo-200">
                 Go to Flowchart (if root exists)
             </button>
-            <button type="button" id="reset-button" class="py-2 px-4 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 transition duration-150 shadow-md hidden" onclick="confirmReset()">
+            <button type="button" id="reset-button"
+                    class="py-2 px-4 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 transition duration-150 shadow-md hidden"
+                    onclick="confirmReset()">
                 Reset Database
             </button>
         </div>
@@ -40,23 +46,27 @@
         <div id="reset-confirm-modal" class="fixed inset-0 hidden items-center justify-center z-50 bg-black bg-opacity-50">
             <div class="bg-white p-6 rounded-xl w-full max-w-md shadow-2xl">
                 <h2 class="text-xl font-semibold text-red-600 mb-4">Confirm Database Reset</h2>
-                <p class="text-gray-700 mb-6">Are you sure you want to delete ALL nodes, relationships, and clicks?</p>
+                <p class="text-gray-700 mb-6">
+                    Are you sure you want to delete ALL nodes, relationships, and clicks?
+                </p>
                 <p class="text-sm text-red-500 mb-6">This will wipe your entire tree structure.</p>
                 <div class="flex justify-end space-x-3">
-                    <button type="button" onclick="closeResetModal()" class="py-2 px-4 text-gray-600 font-semibold rounded-lg hover:bg-gray-100 transition duration-150">
+                    <button type="button" onclick="closeResetModal()"
+                            class="py-2 px-4 text-gray-600 font-semibold rounded-lg hover:bg-gray-100 transition duration-150">
                         Cancel
                     </button>
-                    <button type="button" id="confirm-reset-button" class="py-2 px-4 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 transition duration-150 shadow-md">
+                    <button type="button" id="confirm-reset-button"
+                            class="py-2 px-4 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 transition duration-150 shadow-md">
                         Yes, Reset Everything
                     </button>
                 </div>
             </div>
         </div>
-
     </div>
 
     <script>
-        const API_BASE_URL = "http://127.0.0.1:5000";
+        // BACKEND BASE URL (Render)
+        const API_BASE_URL = "https://nextwebi-backend.onrender.com";
         let retryCount = 0;
         const MAX_RETRIES = 5;
         let childCounter = 0;
@@ -85,7 +95,7 @@
                     await new Promise(resolve => setTimeout(resolve, delay));
                     return fetchWithRetry(endpoint, options);
                 } else {
-                    showMessage(`Fatal Error: ${error.message}. Check if Flask server is running.`, 'error');
+                    showMessage(`Fatal Error: ${error.message}. Check backend availability.`, 'error');
                     throw error;
                 }
             }
@@ -94,7 +104,12 @@
         function showMessage(message, type) {
             const statusDiv = document.getElementById('status-message');
             statusDiv.textContent = message;
-            statusDiv.classList.remove('hidden', 'bg-green-100', 'text-green-800', 'bg-red-100', 'text-red-800', 'bg-blue-100', 'text-blue-800');
+            statusDiv.classList.remove(
+                'hidden',
+                'bg-green-100', 'text-green-800',
+                'bg-red-100', 'text-red-800',
+                'bg-blue-100', 'text-blue-800'
+            );
 
             if (type === 'success') {
                 statusDiv.classList.add('bg-green-100', 'text-green-800');
@@ -123,15 +138,13 @@
                 const options = { method: 'DELETE' };
                 await fetchWithRetry('/reset', options);
                 showMessage('Database successfully reset. You can now create a new tree.', 'success');
-                // Reload page to show the form again
                 window.location.reload(); 
             } catch (error) {
                 showMessage(`Reset failed: ${error.message}`, 'error');
             }
         }
-        
-        // --- Dynamic Child Input Management ---
 
+        // --- Dynamic Child Input Management ---
         function addChildNodeInput() {
             childCounter++;
             const container = document.getElementById('child-nodes-container');
@@ -154,13 +167,10 @@
 
         function removeChildNodeInput(id) {
             const element = document.getElementById(id);
-            if (element) {
-                element.remove();
-            }
+            if (element) element.remove();
         }
-        
-        // --- Setup Check and Render Form ---
 
+        // --- Setup Check and Render Form ---
         function renderForm() {
             const formHtml = `
                 <form id="create-full-tree-form" class="space-y-8">
@@ -173,19 +183,28 @@
                     </div>
 
                     <div class="border border-gray-300 p-4 rounded-xl bg-white">
-                        <h2 class="text-xl font-semibold text-gray-700 mb-4">2. Layer 1 Child Nodes (e.g., Services, Locations)</h2>
+                        <h2 class="text-xl font-semibold text-gray-700 mb-4">
+                            2. Layer 1 Child Nodes (e.g., Services, Locations)
+                        </h2>
                         
-                        <div id="child-nodes-container" class="space-y-4">
-                            </div>
+                        <div id="child-nodes-container" class="space-y-4"></div>
                         
-                        <button type="button" id="add-child-button" class="mt-4 py-2 px-4 bg-gray-200 text-gray-700 font-semibold rounded-lg hover:bg-gray-300 transition duration-150 flex items-center">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+                        <button type="button" id="add-child-button"
+                                class="mt-4 py-2 px-4 bg-gray-200 text-gray-700 font-semibold rounded-lg hover:bg-gray-300 transition duration-150 flex items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
+                                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                 stroke-linejoin="round" class="mr-2">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <line x1="12" y1="8" x2="12" y2="16"></line>
+                                <line x1="8" y1="12" x2="16" y2="12"></line>
+                            </svg>
                             Add Child Node
                         </button>
                     </div>
 
                     <div class="flex justify-end pt-4 border-t pt-4">
-                        <button type="submit" class="py-2 px-4 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 transition duration-150 shadow-md">
+                        <button type="submit"
+                                class="py-2 px-4 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 transition duration-150 shadow-md">
                             Save Full Tree
                         </button>
                     </div>
@@ -193,41 +212,38 @@
             `;
             document.getElementById('setup-form-container').innerHTML = formHtml;
 
-            // Re-attach listeners for dynamically created content
             document.getElementById('add-child-button').addEventListener('click', addChildNodeInput);
             document.getElementById('create-full-tree-form').addEventListener('submit', handleFormSubmit);
 
-            // Add initial child input
             if (document.getElementById('child-nodes-container').children.length === 0) {
-                 addChildNodeInput();
+                addChildNodeInput();
             }
         }
 
         async function checkExistingNodes() {
             try {
-                // Check if any nodes exist
-                const response = await fetch('https://nextwebi-backend.onrender.com/tree');
+                const response = await fetch(`${API_BASE_URL}/tree`);
                 if (!response.ok) throw new Error('HTTP ' + response.status);
                 const data = await response.json();
 
-                const setupContainer = document.getElementById('setup-form-container');
                 const resetButton = document.getElementById('reset-button');
                 
                 if (data && data.length > 0) {
+                    // Root exists: redirect straight to flowchart
                     window.location.href = 'flowchart.html';
                     return;
                 } else {
+                    // No nodes yet: show setup form
                     renderForm();
                     resetButton.classList.add('hidden');
                 }
             } catch (error) {
-                // If fetching fails, we render the form as a fallback.
+                // Backend not reachable or error: still show form as fallback
                 renderForm(); 
             }
         }
-        
-        // --- Form Submission Handler ---
 
+        // --- Form Submission Handler ---
         async function handleFormSubmit(e) {
             e.preventDefault();
             const rootName = document.getElementById('root-name').value.trim();
@@ -239,7 +255,7 @@
             submitButton.textContent = 'Saving...';
 
             try {
-                // --- STEP 1: Create the Root Node ---
+                // STEP 1: Create Root
                 showMessage(`1/3: Creating Root Node '${rootName}'...`, 'info');
                 const rootOptions = {
                     method: 'POST',
@@ -249,7 +265,7 @@
                 const rootResult = await fetchWithRetry('/node/create', rootOptions);
                 const rootId = rootResult.contentId;
                 
-                // --- STEP 2: Process Child Nodes ---
+                // STEP 2: Children
                 const childGroups = document.querySelectorAll('#child-nodes-container > div');
                 const successfulChildren = [];
                 let childIndex = 0;
@@ -262,15 +278,11 @@
                     const childDescription = childDescInput.value.trim();
                     childIndex++;
 
-                    if (!childName) {
-                        // This should be caught by "required" but good for safety
-                        continue; 
-                    }
+                    if (!childName) continue;
 
                     try {
                         showMessage(`2/3: Creating Child Node #${childIndex}: ${childName}...`, 'info');
                         
-                        // 2a. Create the Child Node
                         const childNodeOptions = {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -279,27 +291,27 @@
                         const childResult = await fetchWithRetry('/node/create', childNodeOptions);
                         const childId = childResult.contentId;
 
-                        // 2b. Create the Relationship (Root ID -> Child ID)
                         showMessage(`3/3: Linking ${rootName} to ${childName}...`, 'info');
                         const relationOptions = {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ 
-                                parentId: rootId, 
-                                childId: childId
-                            })
+                            body: JSON.stringify({ parentId: rootId, childId: childId })
                         };
                         await fetchWithRetry('/relation/create', relationOptions);
                         
                         successfulChildren.push(childName);
                     } catch (childError) {
-                        showMessage(`Error creating or linking child '${childName}': ${childError.message}`, 'error');
-                        // IMPORTANT: Continue to the next child even if one fails
+                        showMessage(
+                            `Error creating or linking child '${childName}': ${childError.message}`,
+                            'error'
+                        );
                     }
                 }
 
-                // --- STEP 3: Final Success and Redirection ---
-                const successMsg = `Setup Complete! Root Node '${rootName}' created with ${successfulChildren.length} Layer 1 children. Redirecting to flowchart...`;
+                // STEP 3: Final redirect
+                const successMsg =
+                    `Setup Complete! Root Node '${rootName}' created with ${successfulChildren.length} `
+                    + `Layer 1 children. Redirecting to flowchart...`;
                 showMessage(successMsg, 'success');
                 
                 setTimeout(() => {
@@ -307,13 +319,17 @@
                 }, 1500);
 
             } catch (rootError) {
-                showMessage(`Initial setup failed: ${rootError.message}. Database may require manual reset if the root node was partially created.`, 'error');
+                showMessage(
+                    `Initial setup failed: ${rootError.message}. `
+                    + `Database may require manual reset if the root node was partially created.`,
+                    'error'
+                );
                 submitButton.disabled = false;
                 submitButton.textContent = 'Save Full Tree';
             }
         }
-        
-        // --- Initial Load and Listener Setup ---
+
+        // --- Initial Load and Listeners ---
         document.getElementById('confirm-reset-button').addEventListener('click', handleReset);
         window.addEventListener('load', checkExistingNodes);
     </script>
