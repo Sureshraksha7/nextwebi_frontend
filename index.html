@@ -206,22 +206,16 @@
         async function checkExistingNodes() {
             try {
                 // Check if any nodes exist
-                const response = await fetchWithRetry('/tree'); 
+                const response = await fetch('https://nextwebi-backend.onrender.com/tree');
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                const data = await response.json();
+
                 const setupContainer = document.getElementById('setup-form-container');
                 const resetButton = document.getElementById('reset-button');
                 
-                if (response && response.length > 0) {
-                    // Root exists: show a message and allow manual navigation via the button
-                    const setupContainer = document.getElementById('setup-form-container');
-                    const resetButton = document.getElementById('reset-button');
-
-                    setupContainer.innerHTML = `
-                        <p class="text-center text-gray-600 p-6">
-                            Root node already exists.  
-                            Use "Go to Flowchart" to view/edit it or "Reset Database" to start over.
-                        </p>
-                    `;
-                    resetButton.classList.remove('hidden');
+                if (data && data.length > 0) {
+                    window.location.href = 'flowchart.html';
+                    return;
                 } else {
                     renderForm();
                     resetButton.classList.add('hidden');
