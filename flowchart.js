@@ -35,7 +35,9 @@ let stableRootId = null; // Stores the permanently stable root ID
 let nodeToFocusId = null; 
 
 // GLOBAL SET: Tracks nodes already rendered to prevent duplication/misplacement
-let renderedNodes = new Set(); 
+let renderedNodes = new Set();
+// Show only a single node card (used for search-by-name/ID)
+let singleNodeMode = false; 
 
 // Map status values to Tailwind classes for color coding
 const STATUS_CLASSES = {
@@ -283,21 +285,6 @@ function isNodeVisible(nodeId) {
     const node = nodeMap[nodeId];
     if (!node) return false;
 
-    // 0a. Text search (name / description / friendlyId)
-    const nameSearchInput = document.getElementById('search-filter-input');
-    if (nameSearchInput) {
-        const q = nameSearchInput.value.trim().toLowerCase();
-        if (q.length >= 2) {
-            const inText =
-                (node.name || '').toLowerCase().includes(q) ||
-                (node.description || '').toLowerCase().includes(q) ||
-                (node.friendlyId || '').toLowerCase().includes(q);
-            if (!inText) {
-                return false;
-            }
-        }
-    }
-
     // 1. Connection filter
     const connectionFilter = document.getElementById('connection-filter-select').value;
     const stats = nodeStats[nodeId];
@@ -338,54 +325,79 @@ function linkifyDescription(text) {
 }
 // Main Filter Application Logic (Called by input/select change)
 // Main Filter Application Logic (Called by input/select change)
+// Main Filter Application Logic (Called by input/select change)
+// Main Filter Application Logic (Called by input/select change)
 async function applyFilters() {
+    const nameInput = document.getElementById('search-filter-input');
+    const idInput = document.getElementById('search-id-input');
     const connectionFilter = document.getElementById('connection-filter-select').value;
-    const idSearchInput = document.getElementById('search-id-input');
-    const idQ = idSearchInput ? idSearchInput.value.trim().toLowerCase() : '';
     const vizWrapper = document.getElementById('tree-content-wrapper');
 
-    // 1. If ID search is filled, jump to that node's subtree
-    if (idQ.length >= 1) {
+    const nameQ = nameInput ? nameInput.value.trim().toLowerCase() : '';
+    const idQ = idInput ? idInput.value.trim().toLowerCase() : '';
+
+    // --- 1. Handle search by Name/Description + Friendly ID (top-left number) ---
+    if (nameQ.length >= 2 || idQ.length >= 1) {
         let foundNodeId = null;
+
         for (const id in nodeMap) {
             const node = nodeMap[id];
-            const matchesId =
-                (node.friendlyId || '').toLowerCase().includes(idQ) ||
-                (node.contentId || '').toLowerCase().includes(idQ);
-            if (matchesId) {
+
+            // Name/description match (if nameQ provided)
+            let matchesName = true;
+            if (nameQ.length >= 2) {
+                matchesName =
+                    (node.name || '').toLowerCase().includes(nameQ) ||
+                    (node.description || '').toLowerCase().includes(nameQ);
+            }
+
+            // ID match (if idQ provided) – ONLY friendlyId like "01", "02"
+            let matchesId = true;
+            if (idQ.length >= 1) {
+                matchesId = (node.friendlyId || '').toLowerCase().includes(idQ);
+            }
+
+            if (matchesName && matchesId) {
                 foundNodeId = id;
                 break;
             }
         }
 
         if (foundNodeId) {
-            loadAndRenderVisuals(foundNodeId);
+            singleNodeMode = true;                    // show only this node
+            loadAndRenderVisuals(foundNodeId);        // render from that node
+            const n = nodeMap[foundNodeId];
             showMessage(
-                `Displaying hierarchy starting at: ${nodeMap[foundNodeId].name} (ID ${nodeMap[foundNodeId].friendlyId || ''})`,
+                `Displaying only: ${n.name} (ID ${n.friendlyId || ''})`,
                 'info'
             );
             return;
         } else {
-            vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">No node found matching that ID.</p>';
+            singleNodeMode = false;
+            vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">No node found matching your search.</p>';
             return;
         }
     }
 
-    // 2. Handle connection filters (IN / OUT) — may need stats
+    // --- 2. No search text: apply connection/status filters on full tree ---
+
+    // For IN/OUT filters, ensure stats are loaded
     if (connectionFilter === 'inbound' || connectionFilter === 'outbound') {
         await fetchAllStats();
     }
 
-    // 3. Default: re-render from root with name / status / connection filters
     const rootId = stableRootId || Object.keys(nodeMap)[0] || null;
     if (!rootId) {
         vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">No nodes to display.</p>';
         return;
     }
 
+    // Reset single-node mode so children show normally
+    singleNodeMode = false;
+
+    // Render full tree from root; visibility controlled only by connection/status in isNodeVisible
     loadAndRenderVisuals(rootId);
 }
-
 // NEW: Function to cache all node stats needed for connection filtering
 async function fetchAllStats() {
     if (Object.keys(nodeStats).length === Object.keys(nodeMap).length && Object.keys(nodeMap).length > 0) {
@@ -958,13 +970,12 @@ function renderNode(nodeId, nodeMap, level = 0) {
 
     const nodeName = node.name;
     const nodeIdStr = node.contentId;
-    const friendlyId = node.friendlyId || '';   // <-- short ID like 01, 02
+    const friendlyId = node.friendlyId || '';
     const statusClasses = getStatusClasses(node.status);
 
     // 1. Ensure stable order: Sort children IDs alphabetically for consistent sibling arrangement.
     const sortedChildren = (node.children || []).sort();
     const renderableChildrenIds = sortedChildren;
-
     const hasChildren = renderableChildrenIds.length > 0;
 
     // --- Schedule stat update after rendering ---
@@ -973,16 +984,19 @@ function renderNode(nodeId, nodeMap, level = 0) {
     // --- Children rendering ---
     let childrenHtml = '';
     if (hasChildren) {
-        // Map over all children. The recursive call will handle the 'renderedNodes' check.
-        const childNodesHtml = renderableChildrenIds
-            .map(childId => renderNode(childId, nodeMap, level + 1))
-            .join('');
+        // If we are in "single node mode" and this is the root of the render,
+        // do NOT render any children – just the single node card.
+        if (!(singleNodeMode && level === 0)) {
+            const childNodesHtml = renderableChildrenIds
+                .map(childId => renderNode(childId, nodeMap, level + 1))
+                .join('');
 
-        if (childNodesHtml.trim() !== '') {
-            // Add a class if there is only one child wrapper
-            const containerClass =
-                renderableChildrenIds.length === 1 ? ' single-child-container' : '';
-            childrenHtml = `<div class="tree-container${containerClass}">${childNodesHtml}</div>`;
+            if (childNodesHtml.trim() !== '') {
+                // Add a class if there is only one child wrapper
+                const containerClass =
+                    renderableChildrenIds.length === 1 ? ' single-child-container' : '';
+                childrenHtml = `<div class="tree-container${containerClass}">${childNodesHtml}</div>`;
+            }
         }
     }
 
