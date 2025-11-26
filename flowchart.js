@@ -1,5 +1,4 @@
 // API Base URL (Assuming Flask is running locally on port 5000)
-// API Base URL (Render backend)
 const API_BASE_URL = "https://nextwebi-backend.onrender.com";
 
 // --- ZOOM/PAN STATE ---
@@ -28,6 +27,7 @@ const filterToggleButton = document.getElementById('filter-toggle-button');
 let retryCount = 0;
 const MAX_RETRIES = 5;
 let nodeMap = {}; 
+let parentMap = {};
 let nodeStats = {}; // Cache for IN/OUT counts
 let stableRootId = null; // Stores the permanently stable root ID
 
@@ -61,8 +61,62 @@ function getStableColor(str) {
     const l = 85; 
     return `hsl(${h}, ${s}%, ${l}%)`;
 }
+function getBreadcrumbPath(nodeId) {
+    const names = [];
+    let currentId = nodeId;
+    let guard = 0;
 
+    while (currentId && nodeMap[currentId] && guard < 1000) {
+        names.push(nodeMap[currentId].name);
+        if (!parentMap[currentId]) break;
+        currentId = parentMap[currentId];
+        guard++;
+    }
 
+    return names.reverse().join(' > ');
+}
+function buildSubtreeLines(nodeId, prefix = '') {
+    const node = nodeMap[nodeId];
+    if (!node || !Array.isArray(node.children)) return [];
+
+    const lines = [];
+    for (const childId of node.children) {
+        const child = nodeMap[childId];
+        if (!child) continue;
+
+        // connector from parent downwards
+        lines.push(prefix + '|');
+
+        // child line
+        lines.push(prefix + '|–– ' + child.name);
+
+        // recurse into grandchildren with extra indent
+        const childSub = buildSubtreeLines(childId, prefix + '      ');
+        lines.push(...childSub);
+    }
+    return lines;
+}
+function formatTreePath(pathString) {
+    // pathString is like "Dynamic Services > Domestic Services Pages > ... "
+    const parts = pathString.split('>').map(p => p.trim()).filter(Boolean);
+    if (parts.length === 0) return '';
+
+    let lines = [];
+    // Root line
+    lines.push(parts[0]);
+
+    let prefix = '';
+    for (let i = 1; i < parts.length; i++) {
+        const name = parts[i];
+        // Between levels, add the vertical bar line
+        lines.push(prefix + '|');
+        // Then add the branch segment
+        lines.push(prefix + '|–– ' + name);
+        // Increase indent for next level
+        prefix += '      ';
+    }
+    return lines.join('\n');
+}
 // --- Fetch Functions ---
 async function fetchWithRetry(endpoint, options = {}) {
     try {
@@ -225,12 +279,11 @@ function toggleFilterPanel() {
     window.lucide.createIcons();
 }
 
-// NEW: Determines if a node meets the current visibility criteria
 function isNodeVisible(nodeId) {
     const node = nodeMap[nodeId];
     if (!node) return false;
     
-    // 1. Check Connection Filter
+    // 1. Connection filter
     const connectionFilter = document.getElementById('connection-filter-select').value;
     const stats = nodeStats[nodeId];
 
@@ -242,28 +295,59 @@ function isNodeVisible(nodeId) {
             return false;
         }
     }
-    
+
+    // 2. Status filter
+    const statusFilterEl = document.getElementById('status-filter-select');
+    if (statusFilterEl) {
+        const statusFilter = statusFilterEl.value; // 'all', 'New', 'Processing', 'Completed'
+        if (statusFilter !== 'all' && node.status !== statusFilter) {
+            return false;
+        }
+    }
+
     return true;
 }
-
-// NEW: Main Filter Application Logic (Called by input/select change)
+function getFirstUrl(text) {
+    if (!text) return null;
+    const urlRegex = /(https?:\/\/[^\s]+)/;
+    const match = text.match(urlRegex);
+    return match ? match[1] : null;
+}
+function linkifyDescription(text) {
+    if (!text) return "";
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    return text.replace(urlRegex, (url) => {
+        const safeUrl = url.replace(/"/g, "&quot;"); // basic escaping
+        return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="text-blue-600 underline">${url}</a>`;
+    });
+}
 async function applyFilters() {
-    const searchTerm = document.getElementById('search-filter-input').value.trim().toLowerCase();
+    const searchTermRaw = document.getElementById('search-filter-input').value.trim();
+    const searchTerm = searchTermRaw.toLowerCase();
     const connectionFilter = document.getElementById('connection-filter-select').value;
     const vizWrapper = document.getElementById('tree-content-wrapper');
 
-    // --- 1. Handle Node Name Search ---
+    // --- 1. Handle Node Search (name / description / friendly ID) ---
     if (searchTerm.length >= 2) {
         let foundNodeId = null;
         for (const id in nodeMap) {
-            if (nodeMap[id].name.toLowerCase().includes(searchTerm)) {
+            const node = nodeMap[id];
+            const inText =
+                (node.name || '').toLowerCase().includes(searchTerm) ||
+                (node.description || '').toLowerCase().includes(searchTerm) ||
+                (node.friendlyId || '').toLowerCase().includes(searchTerm);
+
+            if (inText) {
                 foundNodeId = id;
                 break;
             }
         }
         if (foundNodeId) {
             loadAndRenderVisuals(foundNodeId); // Use Visuals render
-            showMessage(`Displaying hierarchy starting at: ${nodeMap[foundNodeId].name}`, 'info');
+            showMessage(
+                `Displaying hierarchy starting at: ${nodeMap[foundNodeId].name} (ID ${nodeMap[foundNodeId].friendlyId || ''})`,
+                'info'
+            );
             return;
         } else {
             vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">No node found matching your search term.</p>';
@@ -382,95 +466,79 @@ async function deleteRelationFromModal(parentId, childId, parentName, childName)
     }
 }
 
-// UPDATED openInfoModal
 async function openInfoModal(nodeId) { 
     const node = nodeMap[nodeId]; 
     if (!node) return;
     const statusInfo = getStatusClasses(node.status);
     
-    // --- Display Static Details ---
+    // Basic details
     document.getElementById('info-node-name').textContent = node.name;
     document.getElementById('info-node-id').textContent = node.contentId;
-    document.getElementById('info-node-description').textContent = node.description || 'No description provided.';
-    
+
+    const infoDescriptionEl = document.getElementById('info-description');
+    if (infoDescriptionEl) {
+        infoDescriptionEl.innerHTML = linkifyDescription(
+            node.description || 'No description provided.'
+        );
+    }
+
+    const infoNodeDescEl = document.getElementById('info-node-description');
+    if (infoNodeDescEl) {
+        infoNodeDescEl.textContent = node.description || 'No description provided.';
+    }
+
+
     const statusSpan = document.getElementById('info-node-status');
     statusSpan.textContent = node.status;
     statusSpan.className = `px-2 py-0.5 rounded text-xs font-medium ${statusInfo.badge}`;
 
-    // --- Initialize Click Stats Placeholder ---
-    document.getElementById('inbound-count-display').textContent = 'Loading...';
-    document.getElementById('inbound-details-display').innerHTML = '<p class="text-xs text-gray-600 italic mt-1">Fetching list...</p>';
-    document.getElementById('outbound-count-display').textContent = 'Loading...';
-    document.getElementById('outbound-details-display').innerHTML = '<p class="text-xs text-gray-600 italic mt-1">Fetching list...</p>';
-    
+    // NEW: tree-style path
+    // Tree-style path including children
+    // Tree-style path including children
+    const rawPath = getBreadcrumbPath(nodeId);          // "root > ... > current node"
+    const baseTree = formatTreePath(rawPath);           // multi-line tree for that path
+
+    // Determine depth (number of segments in path)
+    const depth = rawPath.split('>').map(p => p.trim()).filter(Boolean).length;
+    // Prefix for children: one indent per level
+    const childPrefix = '      '.repeat(depth);
+
+    // Build subtree lines starting from this node, at the correct indent
+    const subtreeLines = buildSubtreeLines(nodeId, childPrefix);
+
+    // Combine: base path + blank line + subtree (if any)
+    let finalText = baseTree;
+    if (subtreeLines.length > 0) {
+        finalText += '\n' + subtreeLines.join('\n');
+    }
+
+    const pathEl = document.getElementById('info-path');
+    if (pathEl) {
+        pathEl.textContent = finalText;
+    }
+
     document.getElementById('info-modal').style.display = 'flex';
 
-    // --- Fetch Click Stats and List Nodes (Non-blocking) ---
-    try {
-        // Fetch Inbound Stats
-        const inboundData = await fetchWithRetry(`/inbound_stats/${encodeURIComponent(nodeId)}`);
-        document.getElementById('inbound-count-display').textContent = inboundData.total_inbound_count;
-        
-        const inboundList = inboundData.inbound_connections.map(conn => {
-            const sourceNode = nodeMap[conn.sourceId];
-            if (!sourceNode) return ''; // Skip if node data is missing
-
-            // Source is Parent, Target (nodeId) is Child
-            const deleteAction = `deleteRelationFromModal('${sourceNode.contentId}', '${nodeId}', '${sourceNode.name}', '${node.name}')`;
-
-            return `
-                <div class="p-2 border border-gray-200 rounded-md bg-white mb-2 flex justify-between items-center">
-                    <div>
-                        <p class="font-semibold text-sm text-gray-800">${sourceNode.name} (${conn.count} clicks)</p>
-                        <p class="text-xs text-gray-600">Status: ${sourceNode.status} | ID: ${sourceNode.contentId.substring(0, 8)}...</p>
-                        <p class="text-[10px] text-gray-500 truncate">${sourceNode.description || 'No description.'}</p>
-                    </div>
-                    <button class="text-red-500 hover:text-red-700 transition" title="Delete Inbound Link" onclick="${deleteAction}">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
-                    </button>
-                </div>
-            `;
-        }).join('');
-
-        document.getElementById('inbound-details-display').innerHTML = `<div class="mt-2 space-y-2">${inboundList || '<p class="text-xs text-gray-500 italic">No inbound connections recorded.</p>'}</div>`;
-        
-        // Fetch Outbound Stats
-        const outboundData = await fetchWithRetry(`/outbound_stats/${encodeURIComponent(nodeId)}`);
-        document.getElementById('outbound-count-display').textContent = outboundData.total_outbound_count;
-        
-        const outboundList = outboundData.outbound_connections.map(conn => {
-            const targetNode = nodeMap[conn.targetId];
-            if (!targetNode) return ''; // Skip if node data is missing
-
-            // Source (nodeId) is Parent, Target is Child
-            const deleteAction = `deleteRelationFromModal('${nodeId}', '${targetNode.contentId}', '${node.name}', '${targetNode.name}')`;
-
-            return `
-                <div class="p-2 border border-gray-200 rounded-md bg-white mb-2 flex justify-between items-center">
-                    <div>
-                        <p class="font-semibold text-sm text-gray-800">${targetNode.name} (${conn.count} clicks)</p>
-                        <p class="text-xs text-gray-600">Status: ${targetNode.status} | ID: ${targetNode.contentId.substring(0, 8)}...</p>
-                        <p class="text-[10px] text-gray-500 truncate">${targetNode.description || 'No description.'}</p>
-                    </div>
-                    <button class="text-red-500 hover:text-red-700 transition" title="Delete Outbound Link" onclick="${deleteAction}">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
-                    </button>
-                </div>
-            `;
-        }).join('');
-
-        document.getElementById('outbound-details-display').innerHTML = `<div class="mt-2 space-y-2">${outboundList || '<p class="text-xs text-gray-500 italic">No outbound connections recorded.</p>'}</div>`;
-
-    } catch (error) {
-        document.getElementById('inbound-count-display').textContent = 'Error';
-        document.getElementById('outbound-count-display').textContent = 'Error';
-        document.getElementById('inbound-details-display').innerHTML = '<p class="text-xs text-red-500">Failed to load details.</p>';
-        document.getElementById('outbound-details-display').innerHTML = '<p class="text-xs text-red-500">Failed to load details.</p>';
-        console.error("Failed to load click stats:", error);
-    }
+    // IMPORTANT: remove any old inbound/outbound stats fetch code here
+    // (the try/catch that was calling /inbound_stats and /outbound_stats)
 }
 function closeInfoModal() {
     document.getElementById('info-modal').style.display = 'none';
+}
+async function openInboundSection(nodeId) {
+    await openInfoModal(nodeId);
+    const inboundSection = document.getElementById('inbound-details-display');
+    if (inboundSection) {
+        inboundSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+}
+
+async function openOutboundSection(nodeId) {
+    await openInfoModal(nodeId);
+    const outboundSection = document.getElementById('outbound-details-display');
+    if (outboundSection) {
+        outboundSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
 }
 function openEditModal(nodeId) { 
     const node = nodeMap[nodeId]; 
@@ -515,6 +583,121 @@ function openSearchLinkModal(parentId, parentName) {
     document.getElementById('confirm-link-button').disabled = true;
     document.getElementById('search-link-modal').style.display = 'flex';
 }
+async function openInboundDetails(nodeId) {
+    const node = nodeMap[nodeId];
+    if (!node) return;
+
+    try {
+        const inboundData = await fetchWithRetry(`/inbound_stats/${encodeURIComponent(nodeId)}`);
+
+        const overlay = document.createElement('div');
+        overlay.className = 'fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50';
+        overlay.id = 'inbound-popup-overlay';
+
+        const contentHtml = `
+            <div class="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[80vh] overflow-y-auto p-4 border border-gray-200">
+                <div class="flex items-center justify-between mb-2">
+                    <h2 class="text-lg font-semibold text-gray-800">
+                        Inbound Links – ${node.name}
+                    </h2>
+                    <button class="text-gray-500 hover:text-gray-700 text-sm px-2 py-1 rounded"
+                            onclick="document.getElementById('inbound-popup-overlay')?.remove()">
+                        ✕
+                    </button>
+                </div>
+                <p class="text-sm text-gray-700 mb-2">
+                    Total inbound clicks:
+                    <span class="font-bold">${inboundData.total_inbound_count}</span>
+                </p>
+                <h3 class="text-sm font-semibold text-gray-700 mb-2">Inbound Node List:</h3>
+                ${
+                    inboundData.inbound_connections.length === 0
+                        ? '<p class="text-xs text-gray-500 italic mb-2">No inbound connections recorded.</p>'
+                        : inboundData.inbound_connections.map(conn => {
+                            const source = nodeMap[conn.sourceId] || {};
+                            const desc = linkifyDescription(source.description || 'No description.');
+
+                            return `
+                                <div class="mb-2 p-2 rounded-lg border border-gray-200 bg-gray-50">
+                                    <p class="text-sm font-medium text-gray-800">
+                                        ${source.name || 'Unknown'} (${conn.count} clicks)
+                                    </p>
+                                    <p class="text-xs text-gray-600">
+                                        Status: ${source.status || 'N/A'} |
+                                        ID: ${(source.contentId || '').substring(0,8)}...
+                                    </p>
+                                    <p class="text-xs text-gray-600 mt-0.5">${desc}</p>
+                                </div>
+                            `;
+                        }).join('')
+                }
+            </div>
+        `;
+
+        overlay.innerHTML = contentHtml;
+        document.body.appendChild(overlay);
+    } catch (e) {
+        alert('Failed to load inbound details: ' + e.message);
+    }
+}
+
+async function openOutboundDetails(nodeId) {
+    const node = nodeMap[nodeId];
+    if (!node) return;
+
+    try {
+        const outboundData = await fetchWithRetry(`/outbound_stats/${encodeURIComponent(nodeId)}`);
+
+        const overlay = document.createElement('div');
+        overlay.className = 'fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50';
+        overlay.id = 'outbound-popup-overlay';
+
+        const contentHtml = `
+            <div class="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[80vh] overflow-y-auto p-4 border border-gray-200">
+                <div class="flex items-center justify-between mb-2">
+                    <h2 class="text-lg font-semibold text-gray-800">
+                        Outbound Links – ${node.name}
+                    </h2>
+                    <button class="text-gray-500 hover:text-gray-700 text-sm px-2 py-1 rounded"
+                            onclick="document.getElementById('outbound-popup-overlay')?.remove()">
+                        ✕
+                    </button>
+                </div>
+                <p class="text-sm text-gray-700 mb-2">
+                    Total outbound clicks:
+                    <span class="font-bold">${outboundData.total_outbound_count}</span>
+                </p>
+                <h3 class="text-sm font-semibold text-gray-700 mb-2">Out-bound Node List:</h3>
+                ${
+                    outboundData.outbound_connections.length === 0
+                        ? '<p class="text-xs text-gray-500 italic mb-2">No outbound connections recorded.</p>'
+                        : outboundData.outbound_connections.map(conn => {
+                            const target = nodeMap[conn.targetId] || {};
+                            const desc = linkifyDescription(target.description || 'No description.');
+
+                            return `
+                                <div class="mb-2 p-2 rounded-lg border border-gray-200 bg-gray-50">
+                                    <p class="text-sm font-medium text-gray-800">
+                                        ${target.name || 'Unknown'} (${conn.count} clicks)
+                                    </p>
+                                    <p class="text-xs text-gray-600">
+                                        Status: ${target.status || 'N/A'} |
+                                        ID: ${(target.contentId || '').substring(0,8)}...
+                                    </p>
+                                    <p class="text-xs text-gray-600 mt-0.5">${desc}</p>
+                                </div>
+                            `;
+                        }).join('')
+                }
+            </div>
+        `;
+
+        overlay.innerHTML = contentHtml;
+        document.body.appendChild(overlay);
+    } catch (e) {
+        alert('Failed to load outbound details: ' + e.message);
+    }
+}
 function closeSearchLinkModal() {
     document.getElementById('search-link-modal').style.display = 'none';
 }
@@ -523,13 +706,17 @@ async function handleSearch() {
     const searchTerm = document.getElementById('search-input').value.trim();
     const resultsList = document.getElementById('search-results-list');
     const statusMsg = document.getElementById('search-status-message');
+
     resultsList.innerHTML = '';
+
     if (searchTerm.length < 3) {
         statusMsg.textContent = 'Please enter at least 3 characters to search.';
         document.getElementById('confirm-link-button').disabled = true;
         return;
     }
+
     statusMsg.textContent = 'Searching...';
+
     try {
         const safeSearchTerm = searchTerm.replace(/\s/g, '_');
 
@@ -539,8 +726,16 @@ async function handleSearch() {
         const results = await fetchWithRetry(endpoint);
         statusMsg.textContent = '';
         document.getElementById('confirm-link-button').disabled = false;
+
         results.forEach(node => {
+            // Skip linking the node to itself
+            if (node.contentId === parentId) {
+                return;
+            }
+
             nodeMap[node.contentId] = node;
+            const breadcrumb = getBreadcrumbPath(node.contentId);
+
             const listItem = document.createElement('li');
             listItem.className = 'flex items-start p-2 bg-white rounded-lg shadow-sm border border-gray-100';
             listItem.innerHTML = `
@@ -550,6 +745,7 @@ async function handleSearch() {
                     <span class="font-semibold text-sm text-gray-800">${node.name}</span> 
                     <span class="text-xs text-gray-500">(${node.status})</span><br>
                     <span class="text-xs text-gray-600 truncate block">${node.description || 'No description.'}</span>
+                    <span class="text-[10px] text-gray-400 truncate block mt-0.5">${breadcrumb}</span>
                 </label>
             `;
             resultsList.appendChild(listItem);
@@ -696,15 +892,21 @@ async function updateNodeStats(nodeId) {
     // --- Final Display ---
     // MODIFIED: Use new class structure for styling.
         statsDiv.innerHTML = `
-        <div class="flex justify-around text-xs font-bold pt-1 border-t border-gray-300 mt-1">
-            <span class="text-gray-700">
-                IN: <span id="inbound-stat-${nodeId}" class="inbound-stat">${inboundCount}</span>
-            </span>
-            <span class="text-gray-700">
-                OUT: <span id="outbound-stat-${nodeId}" class="outbound-stat">${outboundCount}</span>
-            </span>
-        </div>
-    `;
+            <div class="flex justify-around text-xs font-bold pt-1 border-t border-gray-300 mt-1">
+                <button type="button"
+                        class="text-gray-700 focus:outline-none"
+                        onclick="openInboundDetails('${nodeId}')">
+                    IN:
+                    <span id="inbound-stat-${nodeId}" class="inbound-stat ml-1">${inboundCount}</span>
+                </button>
+                <button type="button"
+                        class="text-gray-700 focus:outline-none"
+                        onclick="openOutboundDetails('${nodeId}')">
+                    OUT:
+                    <span id="outbound-stat-${nodeId}" class="outbound-stat ml-1">${outboundCount}</span>
+                </button>
+            </div>
+        `;
 
     // --- Schedule CSS coloring after DOM update ---
     setTimeout(() => applyStatColors(nodeId), 50);
@@ -721,9 +923,6 @@ async function updateNodeStats(nodeId) {
  */
 // --- Node Rendering Logic ---
 
-/**
- * Renders a single node card and its children recursively.
- */
 function renderNode(nodeId, nodeMap, level = 0) {
     const node = nodeMap[nodeId];
 
@@ -747,6 +946,7 @@ function renderNode(nodeId, nodeMap, level = 0) {
 
     const nodeName = node.name;
     const nodeIdStr = node.contentId;
+    const friendlyId = node.friendlyId || '';   // <-- short ID like 01, 02
     const statusClasses = getStatusClasses(node.status);
 
     // 1. Ensure stable order: Sort children IDs alphabetically for consistent sibling arrangement.
@@ -796,6 +996,17 @@ function renderNode(nodeId, nodeMap, level = 0) {
         </button>
     `;
 
+    // Optional external link icon if description has a URL
+    const firstUrl = getFirstUrl(node.description);
+    if (firstUrl) {
+        const safeUrl = firstUrl.replace(/"/g, '&quot;');
+        actionIcons += `
+            <button class="link-btn" onclick="window.open('${safeUrl}', '_blank')" title="Open link from description">
+                <svg data-lucide="link" ${iconStyle}></svg>
+            </button>
+        `;
+    }
+
     // Conditional Delete Icon (Only on Leaf Nodes)
     if ((node.children || []).length === 0) {
         actionIcons += `
@@ -818,7 +1029,12 @@ function renderNode(nodeId, nodeMap, level = 0) {
 
     return `
         <div class="${wrapperClass}" style="--line-color: ${levelColor};">
-            <div class="node-card ${statusClasses.bg} p-2 rounded-xl border ${statusClasses.border} shadow-lg node-box" id="node-${nodeIdStr}">
+            <div class="node-card ${statusClasses.bg} p-2 rounded-xl border ${statusClasses.border} shadow-lg node-box relative" id="node-${nodeIdStr}">
+                <!-- Friendly short ID in top-left -->
+                <div class="absolute top-1 left-2 text-[9px] font-semibold text-gray-500">
+                    ${friendlyId}
+                </div>
+
                 <div class="node-action-bar">
                     ${actionIcons}
                 </div>
@@ -840,6 +1056,10 @@ function renderNode(nodeId, nodeMap, level = 0) {
  * Fetches the entire graph structure and renders the tree starting from the root.
  * This is the function we want to minimize calling, but it's necessary for structural changes.
  */
+/**
+ * Fetches the entire graph structure and renders the tree starting from the root.
+ * This is the function we want to minimize calling, but it's necessary for structural changes.
+ */
 async function loadAndRenderTree() {
     const vizWrapper = document.getElementById('tree-content-wrapper');
     vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">Loading tree structure...</p>';
@@ -856,10 +1076,25 @@ async function loadAndRenderTree() {
 
         // 1. Map all nodes by ID
         nodeMap = {};
+        parentMap = {};
         
         response.forEach(node => {
             nodeMap[node.contentId] = { ...node }; 
         });
+
+        // Build parentMap: childId -> parentId
+        response.forEach(node => {
+            if (Array.isArray(node.children)) {
+                node.children.forEach(childId => {
+                    if (childId) {
+                        parentMap[childId] = node.contentId;
+                    }
+                });
+            }
+        });
+
+        // Assign friendly short IDs (01, 02, 03, ...)
+        assignFriendlyIds(response);
 
         // 2. Identify the Root Node 
         let rootNodeId = null;
@@ -888,7 +1123,29 @@ async function loadAndRenderTree() {
         console.error("Tree loading failed:", error);
     }
 }
+function assignFriendlyIds(orderArray = null) {
+    // If we have an explicit order (e.g. /tree response), use that.
+    // Otherwise, fall back to current nodeMap insertion order.
+    let nodesInOrder;
 
+    if (orderArray && Array.isArray(orderArray)) {
+        // Map the response array (which is in creation order) back to nodeMap entries
+        nodesInOrder = orderArray
+            .map(n => nodeMap[n.contentId])
+            .filter(Boolean);
+    } else {
+        // Object.values preserves insertion order in modern JS engines
+        nodesInOrder = Object.values(nodeMap || {});
+    }
+
+    if (!nodesInOrder.length) return;
+
+    let counter = 1;
+    nodesInOrder.forEach(node => {
+        node.friendlyId = String(counter).padStart(2, '0'); // 01, 02, 03...
+        counter += 1;
+    });
+}
 /**
  * Renders the visualization using current map (no fetch).
  * This is the function called by filter/zoom actions.
@@ -1072,3 +1329,5 @@ window.closeSearchLinkModal = closeSearchLinkModal;
 window.deleteRelationFromModal = deleteRelationFromModal;
 window.loadAndRenderVisuals = loadAndRenderVisuals; // Exposed for filter reset
 window.stableRootId = stableRootId; // Exposed for filter reset (will be updated after load)
+window.openInboundDetails = openInboundDetails;
+window.openOutboundDetails = openOutboundDetails;
