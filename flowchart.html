@@ -142,30 +142,40 @@
 
     <!-- Info Modal -->
     <div id="info-modal" class="fixed inset-0 hidden items-center justify-center z-50 modal-backdrop">
-        <div class="bg-white p-6 rounded-xl node-card w-full max-w-3xl"> 
-            <h2 class="text-xl font-semibold text-gray-700 mb-4">
-                Node Details: <span id="info-node-name" class="text-gray-900"></span>
-            </h2>
-            <div class="space-y-2">
-                <p class="text-sm">
-                    <span class="font-semibold">ID:</span>
-                    <span id="info-node-id" class="font-mono text-xs"></span>
-                </p>
-                <p class="text-sm">
-                    <span class="font-semibold">Status:</span>
-                    <span id="info-node-status" class="px-2 py-0.5 rounded text-xs font-medium"></span>
-                </p>
-                <p class="text-sm font-semibold pt-2">Description:</p>
-                <p id="info-description" class="text-sm text-gray-700"></p>
-                <p id="info-node-description" class="p-3 bg-gray-50 rounded-lg text-sm whitespace-pre-wrap"></p>
-
-                <p class="text-sm font-semibold pt-2">Path:</p>
-                <pre id="info-path"
-                     class="p-3 bg-gray-50 rounded-lg text-xs text-gray-800 whitespace-pre-wrap break-words leading-snug"></pre>
+        <div class="bg-white rounded-xl node-card w-full max-w-3xl h-[80vh] flex flex-col">
+            <!-- Header -->
+            <div class="p-6 border-b">
+                <h2 class="text-xl font-semibold text-gray-700">
+                    Node Details: <span id="info-node-name" class="text-gray-900"></span>
+                </h2>
             </div>
-            
-            <div class="flex justify-end pt-4">
-                <button type="button" onclick="closeInfoModal()" class="py-2 px-4 bg-gray-500 text-white font-semibold rounded-lg hover:bg-gray-600 transition duration-150 shadow-md">
+
+            <!-- Scrollable body -->
+            <div class="px-6 pt-4 pb-2 flex-1 overflow-y-auto">
+                <div class="space-y-2">
+                    <p class="text-sm">
+                        <span class="font-semibold">ID:</span>
+                        <span id="info-node-id" class="font-mono text-xs"></span>
+                    </p>
+                    <p class="text-sm">
+                        <span class="font-semibold">Status:</span>
+                        <span id="info-node-status" class="px-2 py-0.5 rounded text-xs font-medium"></span>
+                    </p>
+
+                    <p class="text-sm font-semibold pt-2">Description:</p>
+                    <p id="info-description" class="text-sm text-gray-700"></p>
+                    <p id="info-node-description" class="p-3 bg-gray-50 rounded-lg text-sm whitespace-pre-wrap"></p>
+
+                    <p class="text-sm font-semibold pt-2">Path:</p>
+                    <pre id="info-path"
+                         class="p-3 bg-gray-50 rounded-lg text-xs text-gray-800 whitespace-pre-wrap break-words leading-snug"></pre>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="px-6 py-4 border-t flex justify-end">
+                <button type="button" onclick="closeInfoModal()"
+                        class="py-2 px-4 bg-gray-500 text-white font-semibold rounded-lg hover:bg-gray-600 transition duration-150 shadow-md">
                     Close
                 </button>
             </div>
