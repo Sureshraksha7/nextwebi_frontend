@@ -37,6 +37,23 @@
                            oninput="applyFilters()">
                     <p class="text-xs text-gray-500 mt-1">Shows node and its entire hierarchy.</p>
                 </div>
+
+                <!-- Search by ID -->
+                <div>
+                    <label class="block text-sm font-semibold text-gray-700 mb-2">
+                        Search Node ID
+                    </label>
+                    <input
+                        type="text"
+                        id="search-id-input"
+                        placeholder="Type friendly ID (01) or system ID..."
+                        class="w-full p-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+                        oninput="applyFilters()"
+                    >
+                    <p class="text-xs text-gray-500 mt-1">
+                        Matches short ID (01, 02, 03...) or part of the full ID.
+                    </p>
+                </div>
                 
                 <div>
                     <label class="block text-sm font-semibold text-gray-700 mb-2">Filter by Connection Status</label>

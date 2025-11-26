@@ -282,7 +282,22 @@ function toggleFilterPanel() {
 function isNodeVisible(nodeId) {
     const node = nodeMap[nodeId];
     if (!node) return false;
-    
+
+    // 0a. Text search (name / description / friendlyId)
+    const nameSearchInput = document.getElementById('search-filter-input');
+    if (nameSearchInput) {
+        const q = nameSearchInput.value.trim().toLowerCase();
+        if (q.length >= 2) {
+            const inText =
+                (node.name || '').toLowerCase().includes(q) ||
+                (node.description || '').toLowerCase().includes(q) ||
+                (node.friendlyId || '').toLowerCase().includes(q);
+            if (!inText) {
+                return false;
+            }
+        }
+    }
+
     // 1. Connection filter
     const connectionFilter = document.getElementById('connection-filter-select').value;
     const stats = nodeStats[nodeId];
@@ -321,50 +336,54 @@ function linkifyDescription(text) {
         return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="text-blue-600 underline">${url}</a>`;
     });
 }
+// Main Filter Application Logic (Called by input/select change)
+// Main Filter Application Logic (Called by input/select change)
 async function applyFilters() {
-    const searchTermRaw = document.getElementById('search-filter-input').value.trim();
-    const searchTerm = searchTermRaw.toLowerCase();
     const connectionFilter = document.getElementById('connection-filter-select').value;
+    const idSearchInput = document.getElementById('search-id-input');
+    const idQ = idSearchInput ? idSearchInput.value.trim().toLowerCase() : '';
     const vizWrapper = document.getElementById('tree-content-wrapper');
 
-    // --- 1. Handle Node Search (name / description / friendly ID) ---
-    if (searchTerm.length >= 2) {
+    // 1. If ID search is filled, jump to that node's subtree
+    if (idQ.length >= 1) {
         let foundNodeId = null;
         for (const id in nodeMap) {
             const node = nodeMap[id];
-            const inText =
-                (node.name || '').toLowerCase().includes(searchTerm) ||
-                (node.description || '').toLowerCase().includes(searchTerm) ||
-                (node.friendlyId || '').toLowerCase().includes(searchTerm);
-
-            if (inText) {
+            const matchesId =
+                (node.friendlyId || '').toLowerCase().includes(idQ) ||
+                (node.contentId || '').toLowerCase().includes(idQ);
+            if (matchesId) {
                 foundNodeId = id;
                 break;
             }
         }
+
         if (foundNodeId) {
-            loadAndRenderVisuals(foundNodeId); // Use Visuals render
+            loadAndRenderVisuals(foundNodeId);
             showMessage(
                 `Displaying hierarchy starting at: ${nodeMap[foundNodeId].name} (ID ${nodeMap[foundNodeId].friendlyId || ''})`,
                 'info'
             );
             return;
         } else {
-            vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">No node found matching your search term.</p>';
+            vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">No node found matching that ID.</p>';
             return;
         }
     }
 
-    // --- 2. Handle Connection Filters & Reset to Full Tree ---
+    // 2. Handle connection filters (IN / OUT) — may need stats
     if (connectionFilter === 'inbound' || connectionFilter === 'outbound') {
         await fetchAllStats();
-        loadAndRenderVisuals(stableRootId); // Use Visuals render
-        showMessage(`Filtered view: Only showing nodes with ${connectionFilter} links.`, 'info');
+    }
+
+    // 3. Default: re-render from root with name / status / connection filters
+    const rootId = stableRootId || Object.keys(nodeMap)[0] || null;
+    if (!rootId) {
+        vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">No nodes to display.</p>';
         return;
     }
-    
-    // --- 3. Reset to Full Tree ---
-    loadAndRenderTree(); 
+
+    loadAndRenderVisuals(rootId);
 }
 
 // NEW: Function to cache all node stats needed for connection filtering
@@ -476,17 +495,10 @@ async function openInfoModal(nodeId) {
     document.getElementById('info-node-id').textContent = node.contentId;
 
     const infoDescriptionEl = document.getElementById('info-description');
-    if (infoDescriptionEl) {
-        infoDescriptionEl.innerHTML = linkifyDescription(
-            node.description || 'No description provided.'
-        );
-    }
+    infoDescriptionEl.innerHTML = linkifyDescription(node.description || 'No description provided.');
 
-    const infoNodeDescEl = document.getElementById('info-node-description');
-    if (infoNodeDescEl) {
-        infoNodeDescEl.textContent = node.description || 'No description provided.';
-    }
-
+    document.getElementById('info-node-description').textContent =
+        node.description || 'No description provided.';
 
     const statusSpan = document.getElementById('info-node-status');
     statusSpan.textContent = node.status;
