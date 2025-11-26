@@ -507,30 +507,35 @@ async function openInfoModal(nodeId) {
     document.getElementById('info-node-id').textContent = node.contentId;
 
     const infoDescriptionEl = document.getElementById('info-description');
-    infoDescriptionEl.innerHTML = linkifyDescription(node.description || 'No description provided.');
+    const rawDesc = node.description || '';
 
-    document.getElementById('info-node-description').textContent =
-        node.description || 'No description provided.';
+    // Show ONLY the link (if any) above, not full description
+    const firstUrl = getFirstUrl(rawDesc);
+    if (firstUrl) {
+        const safeUrl = firstUrl.replace(/"/g, '&quot;');
+        infoDescriptionEl.innerHTML =
+            `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="text-blue-600 underline">${firstUrl}</a>`;
+    } else {
+        // No URL: leave this line empty
+        infoDescriptionEl.innerHTML = '';
+    }
+
+    // Full description in gray box (single place)
+    const fullDescEl = document.getElementById('info-node-description');
+    fullDescEl.textContent = rawDesc || 'No description provided.';
 
     const statusSpan = document.getElementById('info-node-status');
     statusSpan.textContent = node.status;
     statusSpan.className = `px-2 py-0.5 rounded text-xs font-medium ${statusInfo.badge}`;
 
-    // NEW: tree-style path
-    // Tree-style path including children
     // Tree-style path including children
     const rawPath = getBreadcrumbPath(nodeId);          // "root > ... > current node"
     const baseTree = formatTreePath(rawPath);           // multi-line tree for that path
 
-    // Determine depth (number of segments in path)
     const depth = rawPath.split('>').map(p => p.trim()).filter(Boolean).length;
-    // Prefix for children: one indent per level
     const childPrefix = '      '.repeat(depth);
-
-    // Build subtree lines starting from this node, at the correct indent
     const subtreeLines = buildSubtreeLines(nodeId, childPrefix);
 
-    // Combine: base path + blank line + subtree (if any)
     let finalText = baseTree;
     if (subtreeLines.length > 0) {
         finalText += '\n' + subtreeLines.join('\n');
@@ -542,9 +547,6 @@ async function openInfoModal(nodeId) {
     }
 
     document.getElementById('info-modal').style.display = 'flex';
-
-    // IMPORTANT: remove any old inbound/outbound stats fetch code here
-    // (the try/catch that was calling /inbound_stats and /outbound_stats)
 }
 function closeInfoModal() {
     document.getElementById('info-modal').style.display = 'none';
@@ -588,6 +590,12 @@ function openDeleteConfirmModal(nodeId) {
 }
 function closeDeleteConfirmModal() {
     document.getElementById('delete-confirm-modal').style.display = 'none';
+}
+function updateTotalNodeCount() {
+    const el = document.getElementById('total-node-count');
+    if (!el) return;
+    const count = Object.keys(nodeMap || {}).length;
+    el.textContent = `Total nodes: ${count}`;
 }
 function openChildModal(parentId, parentName) {
     document.getElementById('parent-name-display').textContent = parentName;
@@ -1022,13 +1030,13 @@ function renderNode(nodeId, nodeMap, level = 0) {
         </button>
     `;
 
-    // Optional external link icon if description has a URL
+    // Optional external link icon if description has a URL (BLUE)
     const firstUrl = getFirstUrl(node.description);
     if (firstUrl) {
         const safeUrl = firstUrl.replace(/"/g, '&quot;');
         actionIcons += `
             <button class="link-btn" onclick="window.open('${safeUrl}', '_blank')" title="Open link from description">
-                <svg data-lucide="link" ${iconStyle}></svg>
+                <svg data-lucide="link" width="12" height="12" class="text-blue-600" stroke-width="2.5"></svg>
             </button>
         `;
     }
@@ -1121,6 +1129,7 @@ async function loadAndRenderTree() {
 
         // Assign friendly short IDs (01, 02, 03, ...)
         assignFriendlyIds(response);
+        updateTotalNodeCount();
 
         // 2. Identify the Root Node 
         let rootNodeId = null;
