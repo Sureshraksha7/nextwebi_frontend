@@ -33,6 +33,7 @@ let stableRootId = null; // Stores the permanently stable root ID
 
 // Global state for focusing on a node after creation/update
 let nodeToFocusId = null; 
+let ignoreFiltersOnce = false;
 
 // GLOBAL SET: Tracks nodes already rendered to prevent duplication/misplacement
 let renderedNodes = new Set();
@@ -280,10 +281,13 @@ function toggleFilterPanel() {
     }
     window.lucide.createIcons();
 }
-
 function isNodeVisible(nodeId) {
     const node = nodeMap[nodeId];
     if (!node) return false;
+
+    // When doing a full tree render (after load/delete),
+    // temporarily ignore all filters so every node shows.
+    if (ignoreFiltersOnce) return true;
 
     // 1. Connection filter
     const connectionFilter = document.getElementById('connection-filter-select').value;
@@ -308,7 +312,7 @@ function isNodeVisible(nodeId) {
     }
 
     return true;
-}
+}   
 function getFirstUrl(text) {
     if (!text) return null;
     const urlRegex = /(https?:\/\/[^\s]+)/;
