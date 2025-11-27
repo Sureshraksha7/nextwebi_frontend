@@ -631,58 +631,50 @@ async function deleteNode(contentId, name) {
         const parentId = parentMap[contentId];
         const parentNode = parentId ? nodeMap[parentId] : null;
         
-        // 2. First remove the node from DOM to immediately reflect the change
-        const nodeElement = document.getElementById(`node-${contentId}`);
-        let parentWrapper = null;
-        
-        if (nodeElement) {
-            const wrapper = nodeElement.closest('.node-wrapper');
-            if (wrapper) {
-                parentWrapper = wrapper.parentElement;
-                wrapper.remove();
-            }
-        }
-
-        // 3. Delete from server
+        // 2. Remove from server
         await fetchWithRetry(`/node/delete/${encodeURIComponent(contentId)}`, { 
             method: 'DELETE' 
         });
         
-        // 4. Update local state
+        // 3. Update local state
         if (parentNode && parentNode.children) {
             parentNode.children = parentNode.children.filter(id => id !== contentId);
         }
         
-        // 5. Clean up data structures
+        // 4. Clean up data structures
         delete nodeMap[contentId];
         delete parentMap[contentId];
         
-        // 6. Force update the parent's container to fix connections
+        // 5. Reload parent node and its children only
         if (parentId) {
-            // Small delay to ensure DOM is fully updated
-            setTimeout(() => {
-                // If parent has no more children, remove the entire tree container
-                if (parentNode && (!parentNode.children || parentNode.children.length === 0)) {
-                    const parentElement = document.getElementById(`node-${parentId}`);
-                    if (parentElement) {
-                        const treeContainer = parentElement.closest('.node-wrapper')?.querySelector('.tree-container');
-                        if (treeContainer) {
-                            treeContainer.remove();
+            // Get the parent's parent to properly re-render the subtree
+            const grandParentId = parentMap[parentId];
+            
+            if (grandParentId) {
+                // Find the parent's wrapper
+                const parentWrapper = document.querySelector(`#node-${parentId}`)?.closest('.node-wrapper');
+                if (parentWrapper) {
+                    // Remove the entire parent's subtree
+                    parentWrapper.remove();
+                    
+                    // Re-render the parent node
+                    const grandParentNode = nodeMap[grandParentId];
+                    if (grandParentNode) {
+                        // Find the grandparent's container
+                        const grandParentElement = document.querySelector(`#node-${grandParentId}`);
+                        if (grandParentElement) {
+                            const grandParentWrapper = grandParentElement.closest('.node-wrapper');
+                            if (grandParentWrapper) {
+                                // Re-render the parent node
+                                updateParentContainer(grandParentId);
+                            }
                         }
                     }
-                } else {
-                    // Otherwise, update the parent container
-                    updateParentContainer(parentId);
                 }
-                
-                // Force a complete redraw of the tree
-                updateHorizontalLines();
-                
-                // If we're in single node mode, refresh the entire view
-                if (singleNodeMode) {
-                    loadAndRenderVisuals();
-                }
-            }, 50);
+            } else {
+                // If no grandparent (parent is root), just reload the entire tree
+                loadAndRenderVisuals();
+            }
         }
         
         showMessage(`Node "${name}" deleted successfully.`, 'success');
