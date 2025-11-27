@@ -401,36 +401,31 @@ async function applyFilters() {
 // NEW: Function to cache all node stats needed for connection filtering
 
 
-// Optimized function to fetch all node stats in a single request
 async function fetchAllStats() {
     // Only fetch if we don't have any stats yet
     if (Object.keys(nodeStats).length === 0) {
         try {
+            console.log('Fetching all stats...');
             const response = await fetchWithRetry('/stats/all');
             const allStats = await response.json();
+            console.log('Received stats:', allStats);  // Debug log
             
-            // Update the nodeStats cache in one go
+            // Clear existing stats
+            nodeStats = {};
+            
+            // Update the nodeStats cache
             Object.entries(allStats).forEach(([nodeId, stats]) => {
-                if (nodeMap[nodeId]) {
-                    nodeStats[nodeId] = {
-                        inboundCount: stats.total_inbound_count || 0,
-                        outboundCount: stats.total_outbound_count || 0
-                    };
-                }
+                nodeStats[nodeId] = {
+                    inboundCount: stats.total_inbound_count || 0,
+                    outboundCount: stats.total_outbound_count || 0
+                };
             });
             
-            // Initialize stats for nodes not in the response
-            Object.keys(nodeMap).forEach(id => {
-                if (!nodeStats[id]) {
-                    nodeStats[id] = { inboundCount: 0, outboundCount: 0 };
-                }
-            });
+            console.log('Updated nodeStats:', nodeStats);  // Debug log
         } catch (e) {
-            console.warn('Failed to fetch all stats:', e);
-            // Initialize all nodes with 0 stats on error
-            Object.keys(nodeMap).forEach(id => {
-                nodeStats[id] = { inboundCount: 0, outboundCount: 0 };
-            });
+            console.error('Error in fetchAllStats:', e);
+            // Initialize with empty stats on error
+            nodeStats = {};
         }
     }
     return nodeStats;
@@ -897,7 +892,10 @@ function applyStatColors(nodeId) {
 // --- Fetch and Update Click Stats for a single node using cached data ---
 function updateNodeStats(nodeId) {
     // Get stats from cache or use default values
-    const stats = nodeStats[nodeId] || { inboundCount: 0, outboundCount: 0 };
+    const stats = nodeStats[nodeId] || { 
+        inboundCount: 0, 
+        outboundCount: 0 
+    };
     
     // Update the UI with the cached stats
     const statsDiv = document.getElementById(`stats-${nodeId}`);
@@ -918,16 +916,15 @@ function updateNodeStats(nodeId) {
                 </button>
             </div>
         `;
-        
-        // Apply color coding
-        applyStatColors(nodeId);
     }
 }
 function updateVisibleNodeStats() {
+    console.log('Updating visible node stats...');
     // Only update stats for nodes that are currently in the DOM
     document.querySelectorAll('[id^="node-"]').forEach(nodeElement => {
         const nodeId = nodeElement.id.replace('node-', '');
-        updateNodeStats(nodeId); // This now handles both stats and UI
+        console.log('Updating stats for node:', nodeId);
+        updateNodeStats(nodeId);
     });
 }
 // Update the loadAndRenderVisuals function
@@ -947,27 +944,27 @@ async function loadAndRenderVisuals(rootOverrideId = null) {
     }
     
     try {
-        // Load stats before rendering
+        // 1. First load all stats
         await fetchAllStats();
         
-        // Initial render with loading state
+        // 2. Then render the tree
         const treeHtml = renderNode(rootNodeId, nodeMap, 0);
         vizWrapper.innerHTML = treeHtml;
         window.lucide.createIcons();
         
-        // Apply saved zoom level
+        // 3. Apply saved zoom level
         applyZoom(currentScale);
 
-        // Update stats for visible nodes
+        // 4. Update stats for all visible nodes
         updateVisibleNodeStats();
         
-        // Focus if needed
+        // 5. Focus if needed
         if (nodeToFocusId) {
             focusNode(nodeToFocusId);
             nodeToFocusId = null;
         }
         
-        // Update horizontal lines after a short delay
+        // 6. Update horizontal lines after a short delay
         setTimeout(updateHorizontalLines, 50);
     } catch (error) {
         console.error("Error in loadAndRenderVisuals:", error);
