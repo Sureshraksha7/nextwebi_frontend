@@ -963,14 +963,88 @@ async function loadAndRenderVisuals(rootOverrideId = null) {
  */
 // --- Node Rendering Logic ---
 function renderNode(nodeId, nodeMap, level = 0) {
-    // ... existing code ...
+    const node = nodeMap[nodeId];
+    if (!node) return '';
+
+    // Check if node should be visible
+    if (!isNodeVisible(nodeId)) return '';
+
+    // Prevent duplicate rendering
+    if (renderedNodes.has(nodeId)) return '';
+    renderedNodes.add(nodeId);
+
+    const nodeName = node.name;
+    const nodeIdStr = node.contentId;
+    const friendlyId = node.friendlyId || '';
+    const statusClasses = getStatusClasses(node.status);
 
     // Get stats from cache or use default values
     const stats = nodeStats[nodeId] || { inboundCount: 0, outboundCount: 0 };
     const hasInbound = stats.inboundCount > 0;
     const hasOutbound = stats.outboundCount > 0;
 
-    // ... existing node rendering code ...
+    // Handle children
+    const sortedChildren = (node.children || []).sort();
+    const hasChildren = sortedChildren.length > 0;
+
+    // Schedule stat update after rendering
+    setTimeout(() => updateNodeStats(nodeId), 100);
+
+    // Render children
+    let childrenHtml = '';
+    if (hasChildren && !(singleNodeMode && level === 0)) {
+        const childNodesHtml = sortedChildren
+            .map(childId => renderNode(childId, nodeMap, level + 1))
+            .join('');
+
+        if (childNodesHtml.trim() !== '') {
+            const containerClass = sortedChildren.length === 1 ? ' single-child-container' : '';
+            childrenHtml = `<div class="tree-container${containerClass}">${childNodesHtml}</div>`;
+        }
+    }
+
+    // Action icons
+    let actionIcons = '';
+    const iconStyle = `width="12" height="12" class="text-gray-800" stroke-width="2.5"`;
+
+    actionIcons += `
+        <button class="info-btn" onclick="openInfoModal('${nodeIdStr}')" title="View Description/Stats">
+            <svg data-lucide="info" ${iconStyle}></svg>
+        </button>
+        <button class="edit-btn" onclick="openEditModal('${nodeIdStr}')" title="Edit Node Details">
+            <svg data-lucide="pencil" ${iconStyle}></svg>
+        </button>
+        <button class="search-btn" onclick="openSearchLinkModal('${nodeIdStr}', '${nodeName}')" title="Search & Link Nodes">
+            <svg data-lucide="search" ${iconStyle}></svg>
+        </button>
+    `;
+
+    // External link icon if URL exists in description
+    const firstUrl = getFirstUrl(node.description);
+    if (firstUrl) {
+        const safeUrl = firstUrl.replace(/"/g, '&quot;');
+        actionIcons += `
+            <button class="link-btn" onclick="window.open('${safeUrl}', '_blank')" title="Open link from description">
+                <svg data-lucide="link" width="12" height="12" class="text-blue-600" stroke-width="2.5"></svg>
+            </button>
+        `;
+    }
+
+    // Delete icon for leaf nodes
+    if ((node.children || []).length === 0) {
+        actionIcons += `
+            <button class="delete-btn" onclick="openDeleteConfirmModal('${nodeIdStr}')" title="Delete Node">
+                <svg data-lucide="trash-2" width="12" height="12" class="text-red-600" stroke-width="2.5"></svg>
+            </button>
+        `;
+    }
+
+    // Add child icon
+    actionIcons += `
+        <button class="add-child-btn" onclick="openChildModal('${nodeIdStr}', '${nodeName}')" title="Add New Child">
+            <svg data-lucide="plus" ${iconStyle}></svg>
+        </button>
+    `;
 
     // Stats HTML with proper CSS classes
     const statsHtml = `
@@ -992,7 +1066,30 @@ function renderNode(nodeId, nodeMap, level = 0) {
         </div>
     `;
 
-    // ... rest of the render function ...
+    const wrapperClass = hasChildren ? 'node-wrapper has-children' : 'node-wrapper';
+    const levelColor = getLevelColor(level);
+
+    return `
+        <div class="${wrapperClass}" style="--line-color: ${levelColor};">
+            <div class="node-card ${statusClasses.bg} p-2 rounded-xl border ${statusClasses.border} shadow-lg node-box relative" id="node-${nodeIdStr}">
+                <!-- Friendly short ID in top-left -->
+                <div class="absolute top-1 left-2 text-[9px] font-semibold text-gray-500">
+                    ${friendlyId}
+                </div>
+
+                <div class="node-action-bar">
+                    ${actionIcons}
+                </div>
+                <h3 class="text-xs ${statusClasses.text} pl-4 pr-4 whitespace-normal text-center">${nodeName}</h3>
+                <p class="text-[7px] text-gray-600 pl-4 pr-4">Status: ${node.status}</p>
+                <p class="text-[7px] text-gray-600 pl-4 pr-4">
+                    ID: <span class="font-mono">${nodeIdStr.substring(0, 8)}...</span>
+                </p>
+                ${statsHtml}
+            </div>
+            ${childrenHtml}
+        </div>
+    `;
 }
 /**
  * Fetches the entire graph structure and renders the tree starting from the root.
@@ -1178,6 +1275,7 @@ function getLevelColor(level) {
     const saturation = 55;
     const lightness = 70;
     return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+}
 function updateVisibleNodeStats() {
     // Only update stats for nodes that are currently in the DOM
     document.querySelectorAll('[id^="node-"]').forEach(nodeElement => {
