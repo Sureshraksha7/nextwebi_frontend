@@ -33,7 +33,6 @@ let stableRootId = null; // Stores the permanently stable root ID
 
 // Global state for focusing on a node after creation/update
 let nodeToFocusId = null; 
-let ignoreFiltersOnce = false;
 
 // GLOBAL SET: Tracks nodes already rendered to prevent duplication/misplacement
 let renderedNodes = new Set();
@@ -281,11 +280,35 @@ function toggleFilterPanel() {
     }
     window.lucide.createIcons();
 }
+
 function isNodeVisible(nodeId) {
-    // Show a node if it exists in nodeMap.
-    // This completely disables all filtering so ALL nodes are rendered.
-    return !!nodeMap[nodeId];
-}   
+    const node = nodeMap[nodeId];
+    if (!node) return false;
+
+    // 1. Connection filter
+    const connectionFilter = document.getElementById('connection-filter-select').value;
+    const stats = nodeStats[nodeId];
+
+    if (stats) {
+        if (connectionFilter === 'inbound' && stats.inboundCount === 0) {
+            return false;
+        }
+        if (connectionFilter === 'outbound' && stats.outboundCount === 0) {
+            return false;
+        }
+    }
+
+    // 2. Status filter
+    const statusFilterEl = document.getElementById('status-filter-select');
+    if (statusFilterEl) {
+        const statusFilter = statusFilterEl.value; // 'all', 'New', 'Processing', 'Completed'
+        if (statusFilter !== 'all' && node.status !== statusFilter) {
+            return false;
+        }
+    }
+
+    return true;
+}
 function getFirstUrl(text) {
     if (!text) return null;
     const urlRegex = /(https?:\/\/[^\s]+)/;
