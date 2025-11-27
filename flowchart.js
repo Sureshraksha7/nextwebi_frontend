@@ -402,33 +402,30 @@ async function applyFilters() {
 
 
 async function fetchAllStats() {
-    // Only fetch if we don't have any stats yet
-    if (Object.keys(nodeStats).length === 0) {
-        try {
-            console.log('Fetching all stats...');
-            const response = await fetchWithRetry('/stats/all');
-            const allStats = await response.json();
-            console.log('Received stats:', allStats);  // Debug log
-            
-            // Clear existing stats
-            nodeStats = {};
-            
-            // Update the nodeStats cache
-            Object.entries(allStats).forEach(([nodeId, stats]) => {
-                nodeStats[nodeId] = {
-                    inboundCount: stats.total_inbound_count || 0,
-                    outboundCount: stats.total_outbound_count || 0
-                };
-            });
-            
-            console.log('Updated nodeStats:', nodeStats);  // Debug log
-        } catch (e) {
-            console.error('Error in fetchAllStats:', e);
-            // Initialize with empty stats on error
-            nodeStats = {};
-        }
+    try {
+        console.log('Fetching all stats...');
+        const response = await fetchWithRetry('/stats/all');
+        const allStats = await response.json();
+        
+        // Clear existing stats
+        nodeStats = {};
+        
+        // Update the nodeStats cache
+        Object.entries(allStats).forEach(([nodeId, stats]) => {
+            nodeStats[nodeId] = {
+                inboundCount: stats.total_inbound_count || 0,
+                outboundCount: stats.total_outbound_count || 0
+            };
+        });
+        
+        console.log('Updated nodeStats:', nodeStats);
+        return nodeStats;
+    } catch (e) {
+        console.error('Error in fetchAllStats:', e);
+        // Initialize with empty stats on error
+        nodeStats = {};
+        return nodeStats;
     }
-    return nodeStats;
 }
 // --- Node Control Functions ---
 async function deleteNode(contentId, name) {
@@ -1121,9 +1118,8 @@ async function loadAndRenderTree() {
     const vizWrapper = document.getElementById('tree-content-wrapper');
     vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">Loading tree structure...</p>';
     
-    renderedNodes.clear(); 
-    
     try {
+        // 1. Fetch the tree structure
         const response = await fetchWithRetry('/tree');
         
         if (!response || response.length === 0) {
@@ -1131,12 +1127,12 @@ async function loadAndRenderTree() {
             return;
         }
 
-        // 1. Map all nodes by ID
+        // 2. Build node and parent maps
         nodeMap = {};
         parentMap = {};
         
         response.forEach(node => {
-            nodeMap[node.contentId] = { ...node }; 
+            nodeMap[node.contentId] = { ...node };
         });
 
         // Build parentMap: childId -> parentId
@@ -1150,35 +1146,32 @@ async function loadAndRenderTree() {
             }
         });
 
-        // Assign friendly short IDs (01, 02, 03, ...)
+        // 3. Assign friendly IDs
         assignFriendlyIds(response);
         updateTotalNodeCount();
 
-        // 2. Identify the Root Node 
-        let rootNodeId = null;
-        
-        if (response.length > 0) {
-            rootNodeId = response[0].contentId; 
-            stableRootId = rootNodeId; 
-        } else {
-            return;
+        // 4. Identify the root node
+        let rootNodeId = response[0]?.contentId;
+        if (!rootNodeId) {
+            throw new Error('No root node found');
         }
+        stableRootId = rootNodeId;
+
+        // 5. Fetch all stats before rendering
+        await fetchAllStats();
         
-        const rootName = nodeMap[rootNodeId].name;
+        // 6. Now render the tree with the stats
+        const treeHtml = renderNode(rootNodeId, nodeMap, 0);
+        vizWrapper.innerHTML = treeHtml;
+        window.lucide.createIcons();
         
-        // 3. Render visuals (uses loadAndRenderVisuals to handle zoom/focus logic)
-        loadAndRenderVisuals(rootNodeId);
-
-        // 4. Initial Scroll/Reset (Only if no focus node was requested by DML actions)
-        if (!nodeToFocusId) {
-            vizWrapper.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
-        }
-
-        showMessage(`Tree loaded successfully, starting from root: ${rootName}.`, 'success');
-
+        // 7. Apply zoom and other UI updates
+        applyZoom(currentScale);
+        setTimeout(updateHorizontalLines, 50);
+        
     } catch (error) {
-        vizWrapper.innerHTML = '<p class="text-center text-red-500 italic p-10">Error loading graph. Check backend connection or console for details.</p>';
         console.error("Tree loading failed:", error);
+        vizWrapper.innerHTML = '<p class="text-center text-red-500 italic p-10">Error loading graph. Please check console for details.</p>';
     }
 }
 function assignFriendlyIds(orderArray = null) {
