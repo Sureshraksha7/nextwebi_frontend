@@ -400,23 +400,29 @@ async function applyFilters() {
 }
 // NEW: Function to cache all node stats needed for connection filtering
 
-
 async function fetchAllStats() {
     try {
         console.log('Fetching all stats...');
-        const response = await fetchWithRetry('/stats/all');
-        const allStats = await response.json();
+        // Remove the .json() call since fetchWithRetry already parses the JSON
+        const allStats = await fetchWithRetry('/stats/all');
         
         // Clear existing stats
         nodeStats = {};
         
+        // Debug log to see what we received
+        console.log('Received stats from server:', allStats);
+        
         // Update the nodeStats cache
-        Object.entries(allStats).forEach(([nodeId, stats]) => {
-            nodeStats[nodeId] = {
-                inboundCount: stats.total_inbound_count || 0,
-                outboundCount: stats.total_outbound_count || 0
-            };
-        });
+        if (allStats && typeof allStats === 'object') {
+            Object.entries(allStats).forEach(([nodeId, stats]) => {
+                nodeStats[nodeId] = {
+                    inboundCount: stats.total_inbound_count || 0,
+                    outboundCount: stats.total_outbound_count || 0
+                };
+            });
+        } else {
+            console.warn('Unexpected stats format:', allStats);
+        }
         
         console.log('Updated nodeStats:', nodeStats);
         return nodeStats;
@@ -427,18 +433,6 @@ async function fetchAllStats() {
         return nodeStats;
     }
 }
-// --- Node Control Functions ---
-async function deleteNode(contentId, name) {
-    closeDeleteConfirmModal();
-    try {
-        await fetchWithRetry(`/node/delete/${encodeURIComponent(contentId)}`, { method: 'DELETE' }); 
-        showMessage(`Node '${name}' deleted successfully.`, 'success');
-        loadAndRenderTree(); // Must perform full reload after delete
-    } catch (error) {
-        showMessage(`Failed to delete node: ${error.message}`, 'error');
-    }
-}
-
 async function handleEditSubmit(e) {
     e.preventDefault();
     const contentId = document.getElementById('edit-content-id').value;
