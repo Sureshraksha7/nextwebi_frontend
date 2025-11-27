@@ -435,6 +435,19 @@ async function fetchAllStats() {
         });
     }
 }
+// --- Node Control Functions ---
+async function deleteNode(contentId, name) {
+    closeDeleteConfirmModal();
+    try {
+        await fetchWithRetry(`/node/delete/${encodeURIComponent(contentId)}`, { 
+            method: 'DELETE' 
+        }); 
+        showMessage(`Node '${name}' deleted successfully.`, 'success');
+        loadAndRenderTree(); // Full reload to update the tree structure
+    } catch (error) {
+        showMessage(`Failed to delete node: ${error.message}`, 'error');
+    }
+}
 async function handleEditSubmit(e) {
     e.preventDefault();
     const contentId = document.getElementById('edit-content-id').value;
