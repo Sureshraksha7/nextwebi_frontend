@@ -427,13 +427,87 @@ async function fetchAllStats() {
 }
 // --- Node Control Functions ---
 async function deleteNode(contentId, name) {
+    if (!confirm(`Are you sure you want to delete "${name}"? This action cannot be undone.`)) {
+        return;
+    }
+    
     closeDeleteConfirmModal();
+    
     try {
-        await fetchWithRetry(`/node/delete/${encodeURIComponent(contentId)}`, { method: 'DELETE' }); 
-        showMessage(`Node '${name}' deleted successfully.`, 'success');
-        loadAndRenderTree(); // Must perform full reload after delete
+        const parentId = parentMap[contentId];
+        const parentNode = parentId ? nodeMap[parentId] : null;
+        
+        // 1. First, remove the node from the DOM
+        const nodeElement = document.getElementById(`node-${contentId}`);
+        if (nodeElement) {
+            const wrapper = nodeElement.closest('.node-wrapper');
+            if (wrapper) {
+                wrapper.remove();
+            }
+        }
+
+        // 2. Delete from server
+        await fetchWithRetry(`/node/delete/${encodeURIComponent(contentId)}`, { 
+            method: 'DELETE' 
+        });
+        
+        // 3. Update local state
+        if (parentNode && parentNode.children) {
+            parentNode.children = parentNode.children.filter(id => id !== contentId);
+        }
+        
+        // 4. Clean up data structures
+        delete nodeMap[contentId];
+        delete parentMap[contentId];
+        
+        // 5. Update the parent's container to fix connections
+        if (parentId && nodeMap[parentId]) {
+            const parentElement = document.getElementById(`node-${parentId}`);
+            if (parentElement) {
+                const parentWrapper = parentElement.closest('.node-wrapper');
+                if (parentWrapper) {
+                    // Remove existing children container if it exists
+                    const existingContainer = parentWrapper.querySelector('.tree-container');
+                    if (existingContainer) {
+                        existingContainer.remove();
+                    }
+                    
+                    // Only re-render if there are children left
+                    if (nodeMap[parentId].children && nodeMap[parentId].children.length > 0) {
+                        const newContainer = document.createElement('div');
+                        newContainer.className = 'tree-container';
+                        parentWrapper.appendChild(newContainer);
+                        
+                        // Re-render all children
+                        nodeMap[parentId].children.forEach(childId => {
+                            if (nodeMap[childId]) {
+                                const childHtml = renderNode(childId, nodeMap, 1); // Level 1 for children
+                                newContainer.insertAdjacentHTML('beforeend', childHtml);
+                            }
+                        });
+                        
+                        // Update lucide icons for the new elements
+                        window.lucide.createIcons();
+                    }
+                }
+            }
+            
+            // Update horizontal lines after a small delay
+            setTimeout(updateHorizontalLines, 10);
+        }
+        
+        showMessage(`Node "${name}" deleted successfully.`, 'success');
+        
     } catch (error) {
+        console.error('Error deleting node:', error);
         showMessage(`Failed to delete node: ${error.message}`, 'error');
+        
+        // Fallback to full reload if something went wrong
+        try {
+            await loadAndRenderTree();
+        } catch (e) {
+            console.error('Failed to reload tree after error:', e);
+        }
     }
 }
 
@@ -1361,6 +1435,7 @@ window.closeEditModal = closeEditModal;
 window.openDeleteConfirmModal = openDeleteConfirmModal;
 window.closeDeleteConfirmModal = closeDeleteConfirmModal;
 window.openChildModal = openChildModal;
+window.deleteNode = deleteNode;
 window.closeChildModal = closeChildModal;
 window.openSearchLinkModal = openSearchLinkModal;
 window.closeSearchLinkModal = closeSearchLinkModal;
