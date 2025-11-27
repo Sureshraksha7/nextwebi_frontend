@@ -400,27 +400,29 @@ async function applyFilters() {
 }
 // NEW: Function to cache all node stats needed for connection filtering
 async function fetchAllStats() {
+    // If already cached, don't refetch
     if (Object.keys(nodeStats).length === Object.keys(nodeMap).length && Object.keys(nodeMap).length > 0) {
-        return; 
+        return;
     }
-    
-    const statPromises = Object.keys(nodeMap).map(async nodeId => {
-        try {
-            const inboundData = await fetchWithRetry(`/inbound_stats/${encodeURIComponent(nodeId)}`);
-            const outboundData = await fetchWithRetry(`/outbound_stats/${encodeURIComponent(nodeId)}`);
-            
-            nodeStats[nodeId] = {
-                inboundCount: inboundData.total_inbound_count,
-                outboundCount: outboundData.total_outbound_count
-            };
-        } catch (e) {
-            nodeStats[nodeId] = { inboundCount: 0, outboundCount: 0 };
-            console.warn(`Failed to fetch stats for node ${nodeId}`);
-        }
-    });
-    await Promise.all(statPromises);
-}
 
+    try {
+        const allStats = await fetchWithRetry('/stats/all');
+        
+        // Update nodeStats with the new data
+        for (const [nodeId, stats] of Object.entries(allStats)) {
+            nodeStats[nodeId] = {
+                inboundCount: stats.total_inbound_count || 0,
+                outboundCount: stats.total_outbound_count || 0
+            };
+        }
+    } catch (e) {
+        console.warn('Failed to fetch all stats:', e);
+        // Fallback: set all to 0 but don't block the UI
+        Object.keys(nodeMap).forEach(id => {
+            nodeStats[id] = { inboundCount: 0, outboundCount: 0 };
+        });
+    }
+}
 
 // --- Node Control Functions ---
 async function deleteNode(contentId, name) {
