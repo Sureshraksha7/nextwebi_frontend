@@ -558,27 +558,57 @@ async function openOutboundSection(nodeId) {
         outboundSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 }
-async function deleteNode(contentId, name) {
-    closeDeleteConfirmModal();
+async function deleteNode(nodeId) {
+    if (!confirm('Are you sure you want to delete this node?')) {
+        return;
+    }
+
+    const node = nodeMap[nodeId];
+    if (!node) return;
+
+    const parentId = parentMap[nodeId];
+    const parentNode = parentId ? nodeMap[parentId] : null;
+
     try {
-        await fetchWithRetry(`/node/delete/${encodeURIComponent(contentId)}`, { 
-            method: 'DELETE' 
-        }); 
-        showMessage(`Node '${name}' deleted successfully.`, 'success');
+        showMessage(`Deleting '${node.name}'...`, 'info');
         
-        // Clear the tree cache to force a fresh load
-        localStorage.removeItem('tree_cache');
+        // 1. Delete the node from the server
+        await fetchWithRetry(`/node/delete/${encodeURIComponent(nodeId)}`, {
+            method: 'DELETE'
+        });
+
+        // 2. Update local state
+        delete nodeMap[nodeId];
+        delete parentMap[nodeId];
         
-        // Clear local caches
-        renderedNodes.clear();
-        nodeToFocusId = null;
+        // Remove from parent's children
+        if (parentNode && parentNode.children) {
+            parentNode.children = parentNode.children.filter(id => id !== nodeId);
+        }
         
-        // Reload the tree
-        await loadAndRenderTree();
+        // 3. Update friendly IDs
+        const updatedTree = await fetchWithRetry('/tree');
+        assignFriendlyIds(updatedTree);
+        
+        // 4. Update stats
+        await fetchAllStats();
+        
+        // 5. Update the UI
+        if (parentId) {
+            updateNodeInDOM(parentId);
+        } else {
+            // If we deleted the root, reload the entire tree
+            loadAndRenderTree();
+        }
+        
+        showMessage(`Successfully deleted '${node.name}'`, 'success');
+        
     } catch (error) {
+        console.error('Error deleting node:', error);
         showMessage(`Failed to delete node: ${error.message}`, 'error');
     }
-}
+} 
+
 function openEditModal(nodeId) { 
     const node = nodeMap[nodeId]; 
     if (!node) return;
@@ -916,6 +946,7 @@ function updateNodeStats(nodeId) {
         `;
     }
 }
+
 function updateVisibleNodeStats() {
     // Only update stats for nodes that are currently in the DOM
     document.querySelectorAll('[id^="node-"]').forEach(nodeElement => {
@@ -1043,8 +1074,10 @@ function renderNode(nodeId, nodeMap, level = 0) {
 
     // Delete icon for leaf nodes
     if ((node.children || []).length === 0) {
+        // In the actionIcons section, update the delete button:
+        // In the actionIcons section, update the delete button:
         actionIcons += `
-            <button class="delete-btn" onclick="openDeleteConfirmModal('${nodeIdStr}')" title="Delete Node">
+            <button class="delete-btn" onclick="deleteNode('${nodeIdStr}')" title="Delete Node">
                 <svg data-lucide="trash-2" width="12" height="12" class="text-red-600" stroke-width="2.5"></svg>
             </button>
         `;
@@ -1189,6 +1222,54 @@ async function loadAndRenderTree() {
         `;
     }
 }
+// Helper function to update a node and its children in the DOM
+function updateNodeInDOM(nodeId) {
+    const node = nodeMap[nodeId];
+    if (!node) return;
+
+    // Find the parent wrapper of this node
+    const parentNodeId = parentMap[nodeId];
+    const parentWrapper = parentNodeId ? 
+        document.querySelector(`#node-${parentNodeId} + .tree-container`) : 
+        document.getElementById('tree-content-wrapper');
+
+    if (!parentWrapper) return;
+
+    // If this is a root node, re-render the entire tree
+    if (!parentNodeId) {
+        loadAndRenderVisuals(nodeId);
+        return;
+    }
+
+    // Otherwise, re-render just this node's parent's children
+    const parentNode = nodeMap[parentNodeId];
+    if (!parentNode) return;
+
+    // Create a new container for the children
+    const newContainer = document.createElement('div');
+    newContainer.className = 'tree-container' + 
+        (parentNode.children.length === 1 ? ' single-child-container' : '');
+
+    // Render all children of the parent
+    parentNode.children.forEach(childId => {
+        const childNode = nodeMap[childId];
+        if (childNode) {
+            const childHtml = renderNode(childId, nodeMap, 0); // Assuming level 0 for simplicity
+            newContainer.innerHTML += childHtml;
+        }
+    });
+
+    // Replace the old children container with the new one
+    const oldContainer = parentWrapper.querySelector('.tree-container');
+    if (oldContainer) {
+        parentWrapper.replaceChild(newContainer, oldContainer);
+    } else {
+        parentWrapper.appendChild(newContainer);
+    }
+
+    // Update horizontal lines
+    setTimeout(updateHorizontalLines, 50);
+}
 function assignFriendlyIds(orderArray = null) {
     // If we have an explicit order (e.g. /tree response), use that.
     // Otherwise, fall back to current nodeMap insertion order.
@@ -1317,7 +1398,8 @@ function updateVisibleNodeStats() {
 document.addEventListener('DOMContentLoaded', () => {
     
     // Event listener for adding a new child node
-    document.getElementById('create-child-form').addEventListener('submit', async (e) => {
+    // Update the create child form handler
+document.getElementById('create-child-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     
     const parentId = document.getElementById('modal-parent-id').value;
@@ -1333,12 +1415,9 @@ document.addEventListener('DOMContentLoaded', () => {
     closeChildModal();
     
     try {
-        // Show loading state
-        const vizWrapper = document.getElementById('tree-content-wrapper');
-        vizWrapper.innerHTML = '<div class="flex justify-center items-center h-full"><div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div></div>';
-
-        // 1. Create the Child Node
         showMessage(`Creating node '${childName}'...`, 'info');
+        
+        // 1. Create the new node
         const nodeOptions = {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1356,7 +1435,7 @@ document.addEventListener('DOMContentLoaded', () => {
             throw new Error('Failed to create node: No ID returned');
         }
 
-        // 2. Create the Relationship
+        // 2. Create the relationship
         showMessage(`Linking '${parentName}' to '${childName}'...`, 'info');
         const relationOptions = {
             method: 'POST',
@@ -1366,28 +1445,53 @@ document.addEventListener('DOMContentLoaded', () => {
         
         await fetchWithRetry('/relation/create', relationOptions);
         
-        // 3. Clear the form
-        document.getElementById('child-name').value = '';
-        document.getElementById('child-description').value = '';
+        // 3. Update local state
+        const newNode = {
+            contentId: childId,
+            name: childName,
+            description: childDescription,
+            status: 'New',
+            children: [],
+            friendlyId: '' // Will be updated
+        };
         
-        // 4. Set focus to the new node and reload
-        nodeToFocusId = childId;
-        await loadAndRenderTree();
+        // Add to nodeMap
+        nodeMap[childId] = newNode;
+        
+        // Update parent's children
+        if (nodeMap[parentId]) {
+            if (!nodeMap[parentId].children) {
+                nodeMap[parentId].children = [];
+            }
+            nodeMap[parentId].children.push(childId);
+            nodeMap[parentId].children.sort();
+        }
+        
+        // Update parentMap
+        parentMap[childId] = parentId;
+        
+        // 4. Update friendly IDs
+        // For now, we'll do a full tree fetch to get the correct order
+        // In a future optimization, we could update friendly IDs locally
+        const updatedTree = await fetchWithRetry('/tree');
+        assignFriendlyIds(updatedTree);
+        
+        // 5. Update stats
+        await fetchAllStats();
+        
+        // 6. Update the UI
+        updateNodeInDOM(parentId);
         
         showMessage(`Successfully created '${childName}'`, 'success');
+        
+        // Clear the form
+        document.getElementById('child-name').value = '';
+        document.getElementById('child-description').value = '';
         
     } catch (error) {
         console.error('Error creating node:', error);
         showMessage(`Failed to create node: ${error.message}`, 'error');
-        
-        // Try to reload the tree to get back to a known state
-        try {
-            await loadAndRenderTree();
-        } catch (e) {
-            console.error('Failed to reload tree after error:', e);
-        }
     }
-
 });
 
     document.getElementById('edit-node-form').addEventListener('submit', handleEditSubmit);
