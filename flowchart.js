@@ -632,7 +632,44 @@ function openEditModal(nodeId) {
 }
 function closeEditModal() {
     document.getElementById('edit-modal').style.display = 'none';
-    document.getElementById('edit-node-form').rasync function deleteNode(contentId, name) {
+    document.getElementById('edit-node-form').reset();
+}
+function openDeleteConfirmModal(nodeId) { 
+    const node = nodeMap[nodeId]; 
+    if (!node) return;
+    document.getElementById('delete-node-name').textContent = node.name;
+    const confirmBtn = document.getElementById('confirm-delete-button');
+    confirmBtn.onclick = () => deleteNode(node.contentId, node.name);
+    document.getElementById('delete-confirm-modal').style.display = 'flex';
+}
+function closeDeleteConfirmModal() {
+    document.getElementById('delete-confirm-modal').style.display = 'none';
+}
+function updateTotalNodeCount() {
+    const el = document.getElementById('total-node-count');
+    if (!el) return;
+    const count = Object.keys(nodeMap || {}).length;
+    el.textContent = `Total nodes: ${count}`;
+}
+function openChildModal(parentId, parentName) {
+    document.getElementById('parent-name-display').textContent = parentName;
+    document.getElementById('modal-parent-id').value = parentId;
+    document.getElementById('child-modal').style.display = 'flex';
+}
+function closeChildModal() {
+    document.getElementById('child-modal').style.display = 'none';
+    document.getElementById('create-child-form').reset();
+}
+function openSearchLinkModal(parentId, parentName) {
+    document.getElementById('link-parent-name-display').textContent = parentName;
+    document.getElementById('link-modal-parent-id').value = parentId;
+    document.getElementById('search-results-list').innerHTML = '';
+    document.getElementById('search-input').value = '';
+    document.getElementById('search-status-message').textContent = 'Start searching to find nodes to link.';
+    document.getElementById('confirm-link-button').disabled = true;
+    document.getElementById('search-link-modal').style.display = 'flex';
+}
+async function deleteNode(contentId, name) {
     if (!confirm(`Are you sure you want to delete "${name}"? This action cannot be undone.`)) {
         return;
     }
@@ -688,42 +725,6 @@ function closeEditModal() {
             console.error('Failed to reload tree after error:', e);
         }
     }
-}eset();
-}
-function openDeleteConfirmModal(nodeId) { 
-    const node = nodeMap[nodeId]; 
-    if (!node) return;
-    document.getElementById('delete-node-name').textContent = node.name;
-    const confirmBtn = document.getElementById('confirm-delete-button');
-    confirmBtn.onclick = () => deleteNode(node.contentId, node.name);
-    document.getElementById('delete-confirm-modal').style.display = 'flex';
-}
-function closeDeleteConfirmModal() {
-    document.getElementById('delete-confirm-modal').style.display = 'none';
-}
-function updateTotalNodeCount() {
-    const el = document.getElementById('total-node-count');
-    if (!el) return;
-    const count = Object.keys(nodeMap || {}).length;
-    el.textContent = `Total nodes: ${count}`;
-}
-function openChildModal(parentId, parentName) {
-    document.getElementById('parent-name-display').textContent = parentName;
-    document.getElementById('modal-parent-id').value = parentId;
-    document.getElementById('child-modal').style.display = 'flex';
-}
-function closeChildModal() {
-    document.getElementById('child-modal').style.display = 'none';
-    document.getElementById('create-child-form').reset();
-}
-function openSearchLinkModal(parentId, parentName) {
-    document.getElementById('link-parent-name-display').textContent = parentName;
-    document.getElementById('link-modal-parent-id').value = parentId;
-    document.getElementById('search-results-list').innerHTML = '';
-    document.getElementById('search-input').value = '';
-    document.getElementById('search-status-message').textContent = 'Start searching to find nodes to link.';
-    document.getElementById('confirm-link-button').disabled = true;
-    document.getElementById('search-link-modal').style.display = 'flex';
 }
 async function openInboundDetails(nodeId) {
     const node = nodeMap[nodeId];
