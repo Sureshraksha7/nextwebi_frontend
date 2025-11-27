@@ -633,10 +633,12 @@ async function deleteNode(contentId, name) {
         
         // 2. First remove the node from DOM to immediately reflect the change
         const nodeElement = document.getElementById(`node-${contentId}`);
+        let parentWrapper = null;
+        
         if (nodeElement) {
             const wrapper = nodeElement.closest('.node-wrapper');
             if (wrapper) {
-                // Remove the node and its children
+                parentWrapper = wrapper.parentElement;
                 wrapper.remove();
             }
         }
@@ -649,17 +651,6 @@ async function deleteNode(contentId, name) {
         // 4. Update local state
         if (parentNode && parentNode.children) {
             parentNode.children = parentNode.children.filter(id => id !== contentId);
-            
-            // If parent has no more children, remove its children container
-            if (parentNode.children.length === 0) {
-                const parentElement = document.getElementById(`node-${parentId}`);
-                if (parentElement) {
-                    const childrenContainer = parentElement.closest('.node-wrapper')?.querySelector('.tree-container');
-                    if (childrenContainer) {
-                        childrenContainer.remove();
-                    }
-                }
-            }
         }
         
         // 5. Clean up data structures
@@ -668,17 +659,30 @@ async function deleteNode(contentId, name) {
         
         // 6. Force update the parent's container to fix connections
         if (parentId) {
-            // Use requestAnimationFrame to ensure DOM updates are complete
-            requestAnimationFrame(() => {
-                // Refresh the entire parent's children container
-                updateParentContainer(parentId);
+            // Small delay to ensure DOM is fully updated
+            setTimeout(() => {
+                // If parent has no more children, remove the entire tree container
+                if (parentNode && (!parentNode.children || parentNode.children.length === 0)) {
+                    const parentElement = document.getElementById(`node-${parentId}`);
+                    if (parentElement) {
+                        const treeContainer = parentElement.closest('.node-wrapper')?.querySelector('.tree-container');
+                        if (treeContainer) {
+                            treeContainer.remove();
+                        }
+                    }
+                } else {
+                    // Otherwise, update the parent container
+                    updateParentContainer(parentId);
+                }
                 
-                // Also update any horizontal lines
+                // Force a complete redraw of the tree
                 updateHorizontalLines();
                 
-                // Force a reflow to ensure styles are recalculated
-                document.body.offsetHeight;
-            });
+                // If we're in single node mode, refresh the entire view
+                if (singleNodeMode) {
+                    loadAndRenderVisuals();
+                }
+            }, 50);
         }
         
         showMessage(`Node "${name}" deleted successfully.`, 'success');
