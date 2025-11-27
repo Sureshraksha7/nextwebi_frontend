@@ -619,7 +619,20 @@ async function openOutboundSection(nodeId) {
         outboundSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 }
-async function deleteNode(contentId, name) {
+
+function openEditModal(nodeId) { 
+    const node = nodeMap[nodeId]; 
+    if (!node) return;
+    document.getElementById('edit-node-name-old-display').textContent = node.name;
+    document.getElementById('edit-content-id').value = node.contentId;
+    document.getElementById('edit-name').value = node.name;
+    document.getElementById('edit-description').value = node.description;
+    document.getElementById('edit-status').value = node.status; 
+    document.getElementById('edit-modal').style.display = 'flex';
+}
+function closeEditModal() {
+    document.getElementById('edit-modal').style.display = 'none';
+    document.getElementById('edit-node-form').rasync function deleteNode(contentId, name) {
     if (!confirm(`Are you sure you want to delete "${name}"? This action cannot be undone.`)) {
         return;
     }
@@ -627,54 +640,39 @@ async function deleteNode(contentId, name) {
     closeDeleteConfirmModal();
     
     try {
-        // 1. Get parent ID before deletion
         const parentId = parentMap[contentId];
         const parentNode = parentId ? nodeMap[parentId] : null;
         
-        // 2. Remove from server
+        // Remove from server
         await fetchWithRetry(`/node/delete/${encodeURIComponent(contentId)}`, { 
             method: 'DELETE' 
         });
         
-        // 3. Update local state
+        // Update local state
         if (parentNode && parentNode.children) {
             parentNode.children = parentNode.children.filter(id => id !== contentId);
         }
         
-        // 4. Clean up data structures
+        // Remove the node from DOM
+        const nodeElement = document.getElementById(`node-${contentId}`);
+        if (nodeElement) {
+            const wrapper = nodeElement.closest('.node-wrapper');
+            if (wrapper) {
+                wrapper.remove();
+            }
+        }
+        
+        // Clean up data structures
         delete nodeMap[contentId];
         delete parentMap[contentId];
         
-        // 5. Reload parent node and its children only
+        // Update the parent's container to fix connections
         if (parentId) {
-            // Get the parent's parent to properly re-render the subtree
-            const grandParentId = parentMap[parentId];
-            
-            if (grandParentId) {
-                // Find the parent's wrapper
-                const parentWrapper = document.querySelector(`#node-${parentId}`)?.closest('.node-wrapper');
-                if (parentWrapper) {
-                    // Remove the entire parent's subtree
-                    parentWrapper.remove();
-                    
-                    // Re-render the parent node
-                    const grandParentNode = nodeMap[grandParentId];
-                    if (grandParentNode) {
-                        // Find the grandparent's container
-                        const grandParentElement = document.querySelector(`#node-${grandParentId}`);
-                        if (grandParentElement) {
-                            const grandParentWrapper = grandParentElement.closest('.node-wrapper');
-                            if (grandParentWrapper) {
-                                // Re-render the parent node
-                                updateParentContainer(grandParentId);
-                            }
-                        }
-                    }
-                }
-            } else {
-                // If no grandparent (parent is root), just reload the entire tree
-                loadAndRenderVisuals();
-            }
+            // Small delay to ensure DOM updates are processed
+            setTimeout(() => {
+                updateParentContainer(parentId);
+                updateHorizontalLines();
+            }, 0);
         }
         
         showMessage(`Node "${name}" deleted successfully.`, 'success');
@@ -690,20 +688,7 @@ async function deleteNode(contentId, name) {
             console.error('Failed to reload tree after error:', e);
         }
     }
-}
-function openEditModal(nodeId) { 
-    const node = nodeMap[nodeId]; 
-    if (!node) return;
-    document.getElementById('edit-node-name-old-display').textContent = node.name;
-    document.getElementById('edit-content-id').value = node.contentId;
-    document.getElementById('edit-name').value = node.name;
-    document.getElementById('edit-description').value = node.description;
-    document.getElementById('edit-status').value = node.status; 
-    document.getElementById('edit-modal').style.display = 'flex';
-}
-function closeEditModal() {
-    document.getElementById('edit-modal').style.display = 'none';
-    document.getElementById('edit-node-form').reset();
+}eset();
 }
 function openDeleteConfirmModal(nodeId) { 
     const node = nodeMap[nodeId]; 
