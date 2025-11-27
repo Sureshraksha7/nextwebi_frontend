@@ -670,7 +670,6 @@ function openSearchLinkModal(parentId, parentName) {
     document.getElementById('confirm-link-button').disabled = true;
     document.getElementById('search-link-modal').style.display = 'flex';
 }
-
 async function deleteNode(contentId, name) {
     if (!confirm(`Are you sure you want to delete "${name}"? This action cannot be undone.`)) {
         return;
@@ -683,7 +682,13 @@ async function deleteNode(contentId, name) {
         const parentNode = parentId ? nodeMap[parentId] : null;
         
         // 1. First, remove all connecting lines to/from this node
-        document.querySelectorAll(`.connector-line[data-node="${contentId}"]`).forEach(el => el.remove());
+        document.querySelectorAll('.connector-line, .tree-line').forEach(line => {
+            if (line.getAttribute('data-from') === contentId || 
+                line.getAttribute('data-to') === contentId ||
+                line.getAttribute('data-node') === contentId) {
+                line.remove();
+            }
+        });
         
         // 2. Remove the node from the DOM
         const nodeElement = document.getElementById(`node-${contentId}`);
@@ -711,35 +716,42 @@ async function deleteNode(contentId, name) {
         delete nodeMap[contentId];
         delete parentMap[contentId];
         
-        // 6. Update all connections
-        setTimeout(() => {
-            // Remove any remaining lines that might be connected to this node
-            document.querySelectorAll('.connector-line').forEach(line => {
-                if (line.getAttribute('data-from') === contentId || 
-                    line.getAttribute('data-to') === contentId) {
-                    line.remove();
-                }
-            });
-            
-            // Update all lines
-            updateHorizontalLines();
-            
-            // If this node had a parent, update its connections
-            if (parentId) {
-                const parentElement = document.getElementById(`node-${parentId}`);
-                if (parentElement) {
-                    const parentWrapper = parentElement.closest('.node-wrapper');
-                    if (parentWrapper) {
-                        // If no children left, remove the container
-                        if (!parentNode || !parentNode.children || parentNode.children.length === 0) {
-                            const existingContainer = parentWrapper.querySelector('.tree-container');
-                            if (existingContainer) {
-                                existingContainer.remove();
+        // 6. Force a complete re-render of the parent's children to ensure clean state
+        if (parentId && parentNode) {
+            const parentElement = document.getElementById(`node-${parentId}`);
+            if (parentElement) {
+                const parentWrapper = parentElement.closest('.node-wrapper');
+                if (parentWrapper) {
+                    const existingContainer = parentWrapper.querySelector('.tree-container');
+                    if (existingContainer) {
+                        existingContainer.remove();
+                    }
+                    
+                    if (parentNode.children && parentNode.children.length > 0) {
+                        const newContainer = document.createElement('div');
+                        newContainer.className = 'tree-container';
+                        parentWrapper.appendChild(newContainer);
+                        
+                        parentNode.children.forEach(childId => {
+                            if (nodeMap[childId]) {
+                                const childHtml = renderNode(childId, nodeMap, 1);
+                                newContainer.insertAdjacentHTML('beforeend', childHtml);
                             }
-                        }
+                        });
+                        
+                        window.lucide.createIcons();
                     }
                 }
             }
+        }
+        
+        // 7. Force update all lines after a small delay
+        setTimeout(() => {
+            // Remove all existing lines
+            document.querySelectorAll('.connector-line, .tree-line').forEach(el => el.remove());
+            
+            // Rebuild all connections
+            updateHorizontalLines();
             
             // If we're left with no nodes, refresh the whole view
             if (Object.keys(nodeMap).length === 0) {
@@ -755,6 +767,7 @@ async function deleteNode(contentId, name) {
         location.reload();
     }
 }
+
 async function openInboundDetails(nodeId) {
     const node = nodeMap[nodeId];
     if (!node) return;
