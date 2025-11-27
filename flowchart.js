@@ -569,32 +569,6 @@ async function openOutboundSection(nodeId) {
         outboundSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 }
-// Add this new function to handle batch stats fetching
-async function fetchAndUpdateStatsBatch(nodeIds) {
-    if (!nodeIds.length) return;
-    
-    try {
-        // Convert array of node IDs to a comma-separated string
-        const idsParam = nodeIds.join(',');
-        const response = await fetchWithRetry(`/nodes/stats?ids=${encodeURIComponent(idsParam)}`);
-        
-        // Update stats for each node
-        for (const [nodeId, stats] of Object.entries(response)) {
-            const statsElement = document.getElementById(`stats-${nodeId}`);
-            if (statsElement) {
-                statsElement.innerHTML = `
-                    <div class="flex justify-between text-[8px]">
-                        <span class="in-count">IN: ${stats.inCount || 0}</span>
-                        <span class="out-count">OUT: ${stats.outCount || 0}</span>
-                    </div>
-                `;
-                applyStatColors(nodeId);
-            }
-        }
-    } catch (error) {
-        console.error('Error fetching batch stats:', error);
-    }
-}
 function openEditModal(nodeId) { 
     const node = nodeMap[nodeId]; 
     if (!node) return;
@@ -983,132 +957,63 @@ async function updateNodeStats(nodeId) {
  * Renders a single node card and its children recursively.
  */
 // --- Node Rendering Logic ---
+
 function renderNode(nodeId, nodeMap, level = 0) {
     const node = nodeMap[nodeId];
-    if (!node) return '';
 
-    // Early exit for filtered out nodes
+    if (!node) {
+        return '';
+    }
+
+    // --- CRITICAL FILTER CHECK ---
     if (!isNodeVisible(nodeId)) {
         return '';
     }
 
-    // Skip if already rendered
-    if (renderedNodes.has(nodeId)) {
+    const isAlreadyRendered = renderedNodes.has(nodeId);
+
+    // Stop recursion if already drawn (prevents cross-linked nodes from shifting position)
+    if (isAlreadyRendered) {
         return '';
     }
+
     renderedNodes.add(nodeId);
 
-    // Cache DOM elements and class strings
     const nodeName = node.name;
     const nodeIdStr = node.contentId;
     const friendlyId = node.friendlyId || '';
     const statusClasses = getStatusClasses(node.status);
-    
-    // Pre-compute common strings
-    const nodeClass = `node-card ${statusClasses.bg} p-2 rounded-xl border ${statusClasses.border} shadow-lg node-box relative`;
-    const textClass = `text-xs ${statusClasses.text} pl-4 pr-4 whitespace-normal text-center`;
-    const statTextClass = "text-[7px] text-gray-600 pl-4 pr-4";
 
-    // Process children only if needed
+    // 1. Ensure stable order: Sort children IDs alphabetically for consistent sibling arrangement.
+    const sortedChildren = (node.children || []).sort();
+    const renderableChildrenIds = sortedChildren;
+    const hasChildren = renderableChildrenIds.length > 0;
+
+    // --- Schedule stat update after rendering ---
+    setTimeout(() => updateNodeStats(nodeId), 100);
+
+    // --- Children rendering ---
     let childrenHtml = '';
-    const hasChildren = node.children && node.children.length > 0;
-    
-    if (hasChildren && !(singleNodeMode && level === 0)) {
-        const childNodes = [];
-        for (const childId of node.children) {
-            childNodes.push(renderNode(childId, nodeMap, level + 1));
+    if (hasChildren) {
+        // If we are in "single node mode" and this is the root of the render,
+        // do NOT render any children – just the single node card.
+        if (!(singleNodeMode && level === 0)) {
+            const childNodesHtml = renderableChildrenIds
+                .map(childId => renderNode(childId, nodeMap, level + 1))
+                .join('');
+
+            if (childNodesHtml.trim() !== '') {
+                // Add a class if there is only one child wrapper
+                const containerClass =
+                    renderableChildrenIds.length === 1 ? ' single-child-container' : '';
+                childrenHtml = `<div class="tree-container${containerClass}">${childNodesHtml}</div>`;
+            }
         }
-        childrenHtml = childNodes.join('');
-        
-        if (childrenHtml) {
-            const containerClass = node.children.length === 1 ? ' single-child-container' : '';
-            childrenHtml = `<div class="tree-container${containerClass}">${childrenHtml}</div>`;
-        }
     }
 
-    // Build action icons more efficiently
-    const actionIcons = buildActionIcons(node, nodeIdStr, nodeName);
-
-    // Build the node HTML
-    return `
-        <div class="node-wrapper" style="--line-color: ${getLevelColor(level)};">
-            <div class="${nodeClass}" id="node-${nodeIdStr}">
-                <div class="absolute top-1 left-2 text-[9px] font-semibold text-gray-500">
-                    ${friendlyId}
-                </div>
-                <div class="node-action-bar">${actionIcons}</div>
-                <h3 class="${textClass}">${escapeHtml(nodeName)}</h3>
-                <p class="${statTextClass}">Status: ${node.status}</p>
-                <p class="${statTextClass}">ID: <span class="font-mono">${nodeIdStr.substring(0, 8)}...</span></p>
-                <div id="stats-${nodeIdStr}" class="p-0.5">
-                    <span class="text-gray-400 text-[8px] italic">Loading stats...</span>
-                </div>
-            </div>
-            ${childrenHtml}
-        </div>
-    `;
-}
-
-// Add this helper function to build action icons more efficiently
-function buildActionIcons(node, nodeIdStr, nodeName) {
-    const iconStyle = `width="12" height="12" class="text-gray-800" stroke-width="2.5"`;
-    const firstUrl = getFirstUrl(node.description);
-    const hasChildren = node.children && node.children.length > 0;
-    let actionIcons = '';
-    
-    const icons = [
-        `<button class="info-btn" onclick="openInfoModal('${nodeIdStr}')" title="View Description/Stats">
-            <svg data-lucide="info" ${iconStyle}></svg>
-        </button>`,
-        `<button class="edit-btn" onclick="openEditModal('${nodeIdStr}')" title="Edit Node Details">
-            <svg data-lucide="pencil" ${iconStyle}></svg>
-        </button>`,
-        `<button class="search-btn" onclick="openSearchLinkModal('${nodeIdStr}', '${escapeHtml(nodeName)}')" title="Search & Link Nodes">
-            <svg data-lucide="search" ${iconStyle}></svg>
-        </button>`
-    ];
-
-    // Add link icon if URL exists
-    if (firstUrl) {
-        const safeUrl = firstUrl.replace(/"/g, '&quot;');
-        icons.push(`
-            <button class="link-btn" onclick="window.open('${safeUrl}', '_blank')" title="Open link from description">
-                <svg data-lucide="link" width="12" height="12" class="text-blue-600" stroke-width="2.5"></svg>
-            </button>
-        `);
-    }
-
-    // Add delete button only for leaf nodes
-    if (!hasChildren) {
-        icons.push(`
-            <button class="delete-btn" onclick="openDeleteConfirmModal('${nodeIdStr}')" title="Delete Node">
-                <svg data-lucide="trash-2" width="12" height="12" class="text-red-600" stroke-width="2.5"></svg>
-            </button>
-        `);
-    }
-
-    // Always add the add child button
-    icons.push(`
-        <button class="add-child-btn" onclick="openChildModal('${nodeIdStr}', '${escapeHtml(nodeName)}')" title="Add New Child">
-            <svg data-lucide="plus" ${iconStyle}></svg>
-        </button>
-    `);
-
-    return icons.join('');
-}
-
-// Add this helper function to safely escape HTML
-function escapeHtml(unsafe) {
-    return unsafe
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-}
     // --- Icon Logic: All icons are black, no background circles ---
-let actionIcons = '';
-const iconStyle = `width="12" height="12" class="text-gray-800" stroke-width="2.5"`;
+    let actionIcons = '';
+    const iconStyle = `width="12" height="12" class="text-gray-800" stroke-width="2.5"`;
 
     actionIcons += `
         <button class="info-btn" onclick="openInfoModal('${nodeIdStr}')" title="View Description/Stats">
@@ -1196,14 +1101,9 @@ async function loadAndRenderTree() {
     const vizWrapper = document.getElementById('tree-content-wrapper');
     vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">Loading tree structure...</p>';
     
-    // Clear caches
-    renderedNodes.clear();
-    nodeStats = {}; // Clear stats cache
+    renderedNodes.clear(); 
     
     try {
-        // Add a small delay to allow the UI to update
-        await new Promise(resolve => setTimeout(resolve, 50));
-        
         const response = await fetchWithRetry('/tree');
         
         if (!response || response.length === 0) {
@@ -1211,47 +1111,51 @@ async function loadAndRenderTree() {
             return;
         }
 
-        // Batch DOM updates
-        requestAnimationFrame(() => {
-            // 1. Build node maps
-            nodeMap = {};
-            parentMap = {};
-            
-            // First pass: create all nodes
-            response.forEach(node => {
-                nodeMap[node.contentId] = { ...node };
-            });
-            
-            // Second pass: build parent map
-            response.forEach(node => {
-                if (Array.isArray(node.children)) {
-                    node.children.forEach(childId => {
-                        if (childId) {
-                            parentMap[childId] = node.contentId;
-                        }
-                    });
-                }
-            });
-            
-            // Assign friendly IDs
-            assignFriendlyIds(response);
-            updateTotalNodeCount();
-            
-            // Find root node
-            let rootNodeId = response[0]?.contentId;
-            if (!rootNodeId) return;
-            
-            stableRootId = rootNodeId;
-            
-            // Initial render
-            loadAndRenderVisuals(rootNodeId);
-            
-            // Show success message after a short delay
-            setTimeout(() => {
-                showMessage(`Tree loaded successfully, starting from root: ${nodeMap[rootNodeId]?.name}`, 'success');
-            }, 300);
-        });
+        // 1. Map all nodes by ID
+        nodeMap = {};
+        parentMap = {};
         
+        response.forEach(node => {
+            nodeMap[node.contentId] = { ...node }; 
+        });
+
+        // Build parentMap: childId -> parentId
+        response.forEach(node => {
+            if (Array.isArray(node.children)) {
+                node.children.forEach(childId => {
+                    if (childId) {
+                        parentMap[childId] = node.contentId;
+                    }
+                });
+            }
+        });
+
+        // Assign friendly short IDs (01, 02, 03, ...)
+        assignFriendlyIds(response);
+        updateTotalNodeCount();
+
+        // 2. Identify the Root Node 
+        let rootNodeId = null;
+        
+        if (response.length > 0) {
+            rootNodeId = response[0].contentId; 
+            stableRootId = rootNodeId; 
+        } else {
+            return;
+        }
+        
+        const rootName = nodeMap[rootNodeId].name;
+        
+        // 3. Render visuals (uses loadAndRenderVisuals to handle zoom/focus logic)
+        loadAndRenderVisuals(rootNodeId);
+
+        // 4. Initial Scroll/Reset (Only if no focus node was requested by DML actions)
+        if (!nodeToFocusId) {
+            vizWrapper.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+        }
+
+        showMessage(`Tree loaded successfully, starting from root: ${rootName}.`, 'success');
+
     } catch (error) {
         vizWrapper.innerHTML = '<p class="text-center text-red-500 italic p-10">Error loading graph. Check backend connection or console for details.</p>';
         console.error("Tree loading failed:", error);
@@ -1284,38 +1188,43 @@ function assignFriendlyIds(orderArray = null) {
  * Renders the visualization using current map (no fetch).
  * This is the function called by filter/zoom actions.
  */
-async function loadAndRenderVisuals(rootOverrideId = null) {
+function loadAndRenderVisuals(rootOverrideId = null) {
     const vizWrapper = document.getElementById('tree-content-wrapper');
-    renderedNodes.clear();
+    renderedNodes.clear(); 
     vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">Rendering tree...</p>';
 
     let rootNodeId = rootOverrideId || stableRootId || Object.keys(nodeMap)[0];
     if (!rootNodeId || !nodeMap[rootNodeId]) {
-        if (stableRootId) loadAndRenderTree(); 
-        return;
+         // Re-fetch map if map is empty but we expect a root (edge case for corruption)
+         if (stableRootId) loadAndRenderTree(); 
+         return;
     }
     
-    // Initial render
-    const treeHtml = renderNode(rootNodeId, nodeMap, 0);
-    vizWrapper.innerHTML = treeHtml;
+    const treeHtml = renderNode(rootNodeId, nodeMap,0);
+    vizWrapper.innerHTML = treeHtml; 
     window.lucide.createIcons();
     
-    // Apply saved zoom level
-    applyZoom(currentScale);
-    
-    // Focus on target node if specified
+    // 1. Apply saved zoom level (retains user's zoom)
+    applyZoom(currentScale); 
+
+    // 2. Apply Focus after rendering
     if (nodeToFocusId) {
         focusNode(nodeToFocusId);
         nodeToFocusId = null; 
     }
+
+    // 3. Explicitly trigger stat loading for all visible nodes
+    for (const id in nodeMap) {
+        if(document.getElementById(`node-${id}`)) { 
+            updateNodeStats(id);
+        }
+    }
     
-    // Batch update stats for visible nodes
-    const visibleNodeIds = Object.keys(nodeMap).filter(id => document.getElementById(`node-${id}`));
-    await fetchAndUpdateStatsBatch(visibleNodeIds);
-    
-    // Recalculate horizontal lines after a small delay
-    setTimeout(updateHorizontalLines, 100);
+    // 4. Recalculate horizontal line widths
+    // Use setTimeout to ensure the DOM has settled and sizes are final.
+    setTimeout(updateHorizontalLines, 250); 
 }
+
 /**
  * Calculates the width for the horizontal line based on center-to-center distance.
  */
@@ -1362,18 +1271,6 @@ function updateHorizontalLines() {
         container.style.setProperty("--line-end",   end   + "px");
     });
 }
-// Add this at the top of your file with other utility functions
-function debounce(func, wait) {
-    let timeout;
-    return function(...args) {
-        const context = this;
-        clearTimeout(timeout);
-        timeout = setTimeout(() => func.apply(context, args), wait);
-    };
-}
-
-// Then modify your event listeners to use debounce
-window.addEventListener('resize', debounce(updateHorizontalLines, 100));
 function getLevelColor(level) {
     // “Endless” cycle of pleasant HSL colors based on level
     const hue = (level * 57 + 137) % 360;  // spreads hues around the wheel
