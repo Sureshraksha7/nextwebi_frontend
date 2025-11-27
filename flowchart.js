@@ -670,6 +670,7 @@ function openSearchLinkModal(parentId, parentName) {
     document.getElementById('confirm-link-button').disabled = true;
     document.getElementById('search-link-modal').style.display = 'flex';
 }
+
 async function deleteNode(contentId, name) {
     if (!confirm(`Are you sure you want to delete "${name}"? This action cannot be undone.`)) {
         return;
@@ -681,78 +682,77 @@ async function deleteNode(contentId, name) {
         const parentId = parentMap[contentId];
         const parentNode = parentId ? nodeMap[parentId] : null;
         
-        // 1. First, remove the node from the DOM
+        // 1. First, remove all connecting lines to/from this node
+        document.querySelectorAll(`.connector-line[data-node="${contentId}"]`).forEach(el => el.remove());
+        
+        // 2. Remove the node from the DOM
         const nodeElement = document.getElementById(`node-${contentId}`);
         if (nodeElement) {
             const wrapper = nodeElement.closest('.node-wrapper');
             if (wrapper) {
+                // Remove any child containers first
+                const childContainers = wrapper.querySelectorAll('.tree-container');
+                childContainers.forEach(container => container.remove());
                 wrapper.remove();
             }
         }
 
-        // 2. Delete from server
+        // 3. Delete from server
         await fetchWithRetry(`/node/delete/${encodeURIComponent(contentId)}`, { 
             method: 'DELETE' 
         });
         
-        // 3. Update local state
+        // 4. Update local state
         if (parentNode && parentNode.children) {
             parentNode.children = parentNode.children.filter(id => id !== contentId);
         }
         
-        // 4. Clean up data structures
+        // 5. Clean up data structures
         delete nodeMap[contentId];
         delete parentMap[contentId];
         
-        // 5. Update the parent's container to fix connections
-        if (parentId) {
-            // Force a complete re-render of the parent's children
-            const parentElement = document.getElementById(`node-${parentId}`);
-            if (parentElement) {
-                const parentWrapper = parentElement.closest('.node-wrapper');
-                if (parentWrapper) {
-                    // Remove existing children container if it exists
-                    const existingContainer = parentWrapper.querySelector('.tree-container');
-                    if (existingContainer) {
-                        existingContainer.remove();
-                    }
-                    
-                    // Only re-render if there are children left
-                    if (parentNode && parentNode.children && parentNode.children.length > 0) {
-                        const newContainer = document.createElement('div');
-                        newContainer.className = 'tree-container';
-                        parentWrapper.appendChild(newContainer);
-                        
-                        // Re-render all children
-                        parentNode.children.forEach(childId => {
-                            if (nodeMap[childId]) {
-                                const childHtml = renderNode(childId, nodeMap, 1); // Level 1 for children
-                                newContainer.insertAdjacentHTML('beforeend', childHtml);
+        // 6. Update all connections
+        setTimeout(() => {
+            // Remove any remaining lines that might be connected to this node
+            document.querySelectorAll('.connector-line').forEach(line => {
+                if (line.getAttribute('data-from') === contentId || 
+                    line.getAttribute('data-to') === contentId) {
+                    line.remove();
+                }
+            });
+            
+            // Update all lines
+            updateHorizontalLines();
+            
+            // If this node had a parent, update its connections
+            if (parentId) {
+                const parentElement = document.getElementById(`node-${parentId}`);
+                if (parentElement) {
+                    const parentWrapper = parentElement.closest('.node-wrapper');
+                    if (parentWrapper) {
+                        // If no children left, remove the container
+                        if (!parentNode || !parentNode.children || parentNode.children.length === 0) {
+                            const existingContainer = parentWrapper.querySelector('.tree-container');
+                            if (existingContainer) {
+                                existingContainer.remove();
                             }
-                        });
-                        
-                        // Update lucide icons for the new elements
-                        window.lucide.createIcons();
+                        }
                     }
                 }
             }
             
-            // Update horizontal lines
-            setTimeout(updateHorizontalLines, 10);
-        }
+            // If we're left with no nodes, refresh the whole view
+            if (Object.keys(nodeMap).length === 0) {
+                loadAndRenderVisuals();
+            }
+        }, 50);
         
         showMessage(`Node "${name}" deleted successfully.`, 'success');
         
     } catch (error) {
         console.error('Error deleting node:', error);
         showMessage(`Failed to delete node: ${error.message}`, 'error');
-        
-        // Fallback to full reload if something went wrong
-        try {
-            await loadAndRenderTree();
-        } catch (e) {
-            console.error('Failed to reload tree after error:', e);
-        }
+        location.reload();
     }
 }
 async function openInboundDetails(nodeId) {
