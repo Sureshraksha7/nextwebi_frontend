@@ -412,31 +412,29 @@ async function fetchAllStats() {
 
         // Update nodeStats with the new data
         Object.entries(allStats).forEach(([nodeId, stats]) => {
-            nodeStats[nodeId] = {
-                inboundCount: stats.total_inbound_count || 0,
-                outboundCount: stats.total_outbound_count || 0
-            };
+            if (nodeMap[nodeId]) {  // Only include nodes that exist in our map
+                nodeStats[nodeId] = {
+                    inboundCount: stats.total_inbound_count || 0,
+                    outboundCount: stats.total_outbound_count || 0
+                };
+            }
+        });
+        
+        // Initialize stats for nodes not in the response
+        Object.keys(nodeMap).forEach(id => {
+            if (!nodeStats[id]) {
+                nodeStats[id] = { inboundCount: 0, outboundCount: 0 };
+            }
         });
     } catch (e) {
         console.warn('Failed to fetch all stats:', e);
         // Initialize with zeros if the request fails
+        nodeStats = {};
         Object.keys(nodeMap).forEach(id => {
             nodeStats[id] = { inboundCount: 0, outboundCount: 0 };
         });
     }
 }
-// --- Node Control Functions ---
-async function deleteNode(contentId, name) {
-    closeDeleteConfirmModal();
-    try {
-        await fetchWithRetry(`/node/delete/${encodeURIComponent(contentId)}`, { method: 'DELETE' }); 
-        showMessage(`Node '${name}' deleted successfully.`, 'success');
-        loadAndRenderTree(); // Must perform full reload after delete
-    } catch (error) {
-        showMessage(`Failed to delete node: ${error.message}`, 'error');
-    }
-}
-
 async function handleEditSubmit(e) {
     e.preventDefault();
     const contentId = document.getElementById('edit-content-id').value;
@@ -886,70 +884,48 @@ function applyStatColors(nodeId) {
 
 // --- NEW FUNCTION: Fetch and Update Click Stats for a single node with retries ---
 async function updateNodeStats(nodeId) {
-    const statsDiv = document.getElementById(`stats-${nodeId}`);
-    if (!statsDiv) return;
-    
-    // Set loading state immediately
-    statsDiv.innerHTML = '<span class="text-gray-400 text-[8px] italic">Loading stats...</span>';
-    
-    let inboundCount = 0;
-    let outboundCount = 0;
-    const MAX_STAT_RETRIES = 3; 
-
-    // --- Fetch Stats with Retries ---
-    for (let i = 0; i < MAX_STAT_RETRIES; i++) {
-        try {
-            // Attempt to fetch both inbound and outbound data
-            const inboundData = await fetchWithRetry(`/inbound_stats/${encodeURIComponent(nodeId)}`);
-            const outboundData = await fetchWithRetry(`/outbound_stats/${encodeURIComponent(nodeId)}`);
-
-            inboundCount = inboundData.total_inbound_count;
-            outboundCount = outboundData.total_outbound_count;
-            
-            // Cache stats for filtering logic
-            nodeStats[nodeId] = { inboundCount, outboundCount }; 
-            
-            // If data is successfully fetched, break the loop
-            break; 
-
-        } catch (error) {
-            // If it's the last attempt and it failed, log the error
-            if (i === MAX_STAT_RETRIES - 1) {
-                console.error(`Failed to load stats for ${nodeId} after ${MAX_STAT_RETRIES} attempts.`, error);
-                statsDiv.innerHTML = '<span class="text-red-500 text-[8px]">Stats Error</span>';
-                return;
-            }
-            // Wait briefly before retrying
-            await new Promise(resolve => setTimeout(resolve, 500)); 
-        }
+    // If we already have stats for this node, use them
+    if (nodeStats[nodeId]) {
+        updateNodeStatsUI(nodeId, nodeStats[nodeId].inboundCount, nodeStats[nodeId].outboundCount);
+        return;
     }
+
+    // If we don't have stats yet, fetch all stats
+    await fetchAllStats();
     
-    // --- Final Display ---
-    // MODIFIED: Use new class structure for styling.
-        statsDiv.innerHTML = `
-            <div class="flex justify-around text-xs font-bold pt-1 border-t border-gray-300 mt-1">
-                <button type="button"
-                        class="text-gray-700 focus:outline-none"
-                        onclick="openInboundDetails('${nodeId}')">
-                    IN:
-                    <span id="inbound-stat-${nodeId}" class="inbound-stat ml-1">${inboundCount}</span>
-                </button>
-                <button type="button"
-                        class="text-gray-700 focus:outline-none"
-                        onclick="openOutboundDetails('${nodeId}')">
-                    OUT:
-                    <span id="outbound-stat-${nodeId}" class="outbound-stat ml-1">${outboundCount}</span>
-                </button>
-            </div>
-        `;
-
-    // --- Schedule CSS coloring after DOM update ---
-    setTimeout(() => applyStatColors(nodeId), 50);
-
-    // Recalculate horizontal lines after this node’s width may have changed
-    setTimeout(updateHorizontalLines, 0);
+    // Try again with the updated stats
+    if (nodeStats[nodeId]) {
+        updateNodeStatsUI(nodeId, nodeStats[nodeId].inboundCount, nodeStats[nodeId].outboundCount);
+    } else {
+        // If still no stats, set to 0
+        updateNodeStatsUI(nodeId, 0, 0);
+    }
 }
 
+function updateNodeStatsUI(nodeId, inboundCount, outboundCount) {
+    const statsDiv = document.getElementById(`stats-${nodeId}`);
+    if (!statsDiv) return;
+
+    statsDiv.innerHTML = `
+        <div class="flex justify-around text-xs font-bold pt-1 border-t border-gray-300 mt-1">
+            <button type="button"
+                    class="text-gray-700 focus:outline-none"
+                    onclick="openInboundDetails('${nodeId}')">
+                IN:
+                <span id="inbound-stat-${nodeId}" class="inbound-stat ml-1">${inboundCount}</span>
+            </button>
+            <button type="button"
+                    class="text-gray-700 focus:outline-none"
+                    onclick="openOutboundDetails('${nodeId}')">
+                OUT:
+                <span id="outbound-stat-${nodeId}" class="outbound-stat ml-1">${outboundCount}</span>
+            </button>
+        </div>
+    `;
+
+    // Apply color coding
+    setTimeout(() => applyStatColors(nodeId), 50);
+}
 
 // --- Node Rendering Logic ---
 
@@ -1188,43 +1164,56 @@ function assignFriendlyIds(orderArray = null) {
  * Renders the visualization using current map (no fetch).
  * This is the function called by filter/zoom actions.
  */
-function loadAndRenderVisuals(rootOverrideId = null) {
+async function loadAndRenderVisuals(rootOverrideId = null) {
     const vizWrapper = document.getElementById('tree-content-wrapper');
+    if (!vizWrapper) return;
+    
     renderedNodes.clear(); 
     vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">Rendering tree...</p>';
 
     let rootNodeId = rootOverrideId || stableRootId || Object.keys(nodeMap)[0];
     if (!rootNodeId || !nodeMap[rootNodeId]) {
-         // Re-fetch map if map is empty but we expect a root (edge case for corruption)
-         if (stableRootId) loadAndRenderTree(); 
-         return;
-    }
-    
-    const treeHtml = renderNode(rootNodeId, nodeMap,0);
-    vizWrapper.innerHTML = treeHtml; 
-    window.lucide.createIcons();
-    
-    // 1. Apply saved zoom level (retains user's zoom)
-    applyZoom(currentScale); 
-
-    // 2. Apply Focus after rendering
-    if (nodeToFocusId) {
-        focusNode(nodeToFocusId);
-        nodeToFocusId = null; 
-    }
-
-    // 3. Explicitly trigger stat loading for all visible nodes
-    for (const id in nodeMap) {
-        if(document.getElementById(`node-${id}`)) { 
-            updateNodeStats(id);
+        if (stableRootId) {
+            await loadAndRenderTree();
         }
+        return;
     }
     
-    // 4. Recalculate horizontal line widths
-    // Use setTimeout to ensure the DOM has settled and sizes are final.
-    setTimeout(updateHorizontalLines, 250); 
-}
+    try {
+        // Fetch all stats before rendering
+        await fetchAllStats();
+        
+        const treeHtml = renderNode(rootNodeId, nodeMap, 0);
+        vizWrapper.innerHTML = treeHtml; 
+        window.lucide.createIcons();
+        
+        // Apply saved zoom level
+        applyZoom(currentScale); 
 
+        // Apply focus after rendering
+        if (nodeToFocusId) {
+            focusNode(nodeToFocusId);
+            nodeToFocusId = null; 
+        }
+
+        // Update stats for all visible nodes (from cache)
+        for (const id in nodeMap) {
+            if (document.getElementById(`node-${id}`)) { 
+                updateNodeStatsUI(
+                    id, 
+                    nodeStats[id]?.inboundCount || 0, 
+                    nodeStats[id]?.outboundCount || 0
+                );
+            }
+        }
+        
+        // Recalculate horizontal lines
+        setTimeout(updateHorizontalLines, 250);
+    } catch (error) {
+        console.error("Error in loadAndRenderVisuals:", error);
+        vizWrapper.innerHTML = '<p class="text-center text-red-500 italic p-10">Error rendering tree. Please try refreshing the page.</p>';
+    }
+}
 /**
  * Calculates the width for the horizontal line based on center-to-center distance.
  */

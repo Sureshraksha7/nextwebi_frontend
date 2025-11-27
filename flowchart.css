@@ -315,3 +315,12 @@ body {
     font-size: 0.75rem !important; /* Enforce text-xs (12px) */
     font-weight: 700 !important;
 }
+/* Add to your existing styles */
+.modal {
+    transition: opacity 0.3s ease;
+}
+
+.modal.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
