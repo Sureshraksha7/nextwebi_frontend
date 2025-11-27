@@ -630,18 +630,7 @@ async function deleteNode(contentId, name) {
         // 1. Get parent ID before deletion
         const parentId = parentMap[contentId];
         
-        // 2. Delete from server
-        await fetchWithRetry(`/node/delete/${encodeURIComponent(contentId)}`, { 
-            method: 'DELETE' 
-        });
-        
-        // 3. Update local state
-        // Remove from parent's children array
-        if (parentId && nodeMap[parentId] && nodeMap[parentId].children) {
-            nodeMap[parentId].children = nodeMap[parentId].children.filter(id => id !== contentId);
-        }
-        
-        // Remove from DOM
+        // 2. First remove from DOM to immediately reflect the change
         const nodeElement = document.getElementById(`node-${contentId}`);
         if (nodeElement) {
             const wrapper = nodeElement.closest('.node-wrapper');
@@ -649,14 +638,29 @@ async function deleteNode(contentId, name) {
                 wrapper.remove();
             }
         }
+
+        // 3. Then delete from server
+        await fetchWithRetry(`/node/delete/${encodeURIComponent(contentId)}`, { 
+            method: 'DELETE' 
+        });
         
-        // Clean up data structures
+        // 4. Update local state
+        if (parentId && nodeMap[parentId] && nodeMap[parentId].children) {
+            nodeMap[parentId].children = nodeMap[parentId].children.filter(id => id !== contentId);
+        }
+        
+        // 5. Clean up data structures
         delete nodeMap[contentId];
         delete parentMap[contentId];
         
-        // 4. Update parent's container to fix connections
+        // 6. Force update the parent's container to redraw connections
         if (parentId) {
-            updateParentContainer(parentId);
+            // Small delay to ensure DOM is updated
+            setTimeout(() => {
+                updateParentContainer(parentId);
+                // Also update any horizontal lines
+                updateHorizontalLines();
+            }, 10);
         }
         
         showMessage(`Node "${name}" deleted successfully.`, 'success');
