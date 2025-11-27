@@ -1089,76 +1089,76 @@ function renderNode(nodeId, nodeMap, level = 0) {
         </div>
     `;
 }
-/**
- * Fetches the entire graph structure and renders the tree starting from the root.
- * This is the function we want to minimize calling, but it's necessary for structural changes.
- */
-/**
- * Fetches the entire graph structure and renders the tree starting from the root.
- * This is the function we want to minimize calling, but it's necessary for structural changes.
- */
+// Add this at the top of the file
+const TREE_CACHE_KEY = 'tree_cache';
+const CACHE_EXPIRY = 5 * 60 * 1000; // 5 minutes
+
 async function loadAndRenderTree() {
     const vizWrapper = document.getElementById('tree-content-wrapper');
-    vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">Loading tree structure...</p>';
+    const now = Date.now();
     
-    renderedNodes.clear(); 
+    // Try to load from cache first
+    const cachedData = localStorage.getItem(TREE_CACHE_KEY);
+    if (cachedData) {
+        const { data, timestamp } = JSON.parse(cachedData);
+        if (now - timestamp < CACHE_EXPIRY) {
+            processTreeData(data);
+            return;
+        }
+    }
+
+    // Show loading state
+    vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">Loading tree structure...</p>';
+    renderedNodes.clear();
     
     try {
         const response = await fetchWithRetry('/tree');
-        
         if (!response || response.length === 0) {
-            vizWrapper.innerHTML = '<p class="text-center text-red-500 italic p-10">No Root Node found. <a href="index.html" class="text-indigo-600 font-semibold hover:underline">Click here to create the root node.</a></p>';
+            vizWrapper.innerHTML = '<p class="text-center text-red-500 italic p-10">No Root Node found.</p>';
             return;
         }
 
-        // 1. Map all nodes by ID
-        nodeMap = {};
-        parentMap = {};
+        // Cache the response
+        localStorage.setItem(TREE_CACHE_KEY, JSON.stringify({
+            data: response,
+            timestamp: now
+        }));
+
+        processTreeData(response);
         
-        response.forEach(node => {
-            nodeMap[node.contentId] = { ...node }; 
-        });
-
-        // Build parentMap: childId -> parentId
-        response.forEach(node => {
-            if (Array.isArray(node.children)) {
-                node.children.forEach(childId => {
-                    if (childId) {
-                        parentMap[childId] = node.contentId;
-                    }
-                });
-            }
-        });
-
-        // Assign friendly short IDs (01, 02, 03, ...)
-        assignFriendlyIds(response);
-        updateTotalNodeCount();
-
-        // 2. Identify the Root Node 
-        let rootNodeId = null;
-        
-        if (response.length > 0) {
-            rootNodeId = response[0].contentId; 
-            stableRootId = rootNodeId; 
-        } else {
-            return;
-        }
-        
-        const rootName = nodeMap[rootNodeId].name;
-        
-        // 3. Render visuals (uses loadAndRenderVisuals to handle zoom/focus logic)
-        loadAndRenderVisuals(rootNodeId);
-
-        // 4. Initial Scroll/Reset (Only if no focus node was requested by DML actions)
-        if (!nodeToFocusId) {
-            vizWrapper.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
-        }
-
-        showMessage(`Tree loaded successfully, starting from root: ${rootName}.`, 'success');
-
     } catch (error) {
-        vizWrapper.innerHTML = '<p class="text-center text-red-500 italic p-10">Error loading graph. Check backend connection or console for details.</p>';
         console.error("Tree loading failed:", error);
+        vizWrapper.innerHTML = '<p class="text-center text-red-500 italic p-10">Error loading graph. Please try again.</p>';
+    }
+}
+
+function processTreeData(nodes) {
+    // Build node maps
+    nodeMap = {};
+    parentMap = {};
+    
+    nodes.forEach(node => {
+        const nodeCopy = {...node};
+        nodeMap[node.contentId] = nodeCopy;
+        
+        // Build parent map
+        if (node.children) {
+            node.children.forEach(childId => {
+                if (childId) {
+                    parentMap[childId] = node.contentId;
+                }
+            });
+        }
+    });
+    
+    // Rest of your existing processing...
+    assignFriendlyIds(nodes);
+    updateTotalNodeCount();
+    
+    const rootNodeId = nodes[0]?.contentId;
+    if (rootNodeId) {
+        stableRootId = rootNodeId;
+        loadAndRenderVisuals(rootNodeId);
     }
 }
 function assignFriendlyIds(orderArray = null) {
