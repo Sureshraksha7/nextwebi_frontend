@@ -287,6 +287,7 @@ function toggleFilterPanel() {
 function isNodeVisible(nodeId) {
     const node = nodeMap[nodeId];
     if (!node) return false;
+    if (node._forceVisible) return true;
 
     // 1. Connection filter
     const connectionFilter = document.getElementById('connection-filter-select').value;
@@ -1105,6 +1106,7 @@ async function loadAndRenderVisuals(rootOverrideId = null) {
 function renderNode(nodeId, nodeMap, level = 0) {
     const node = nodeMap[nodeId];
     if (!node) return '';
+    if (!node._forceVisible && !isNodeVisible(nodeId)) return '';
 
     // Check if node should be visible
     if (!isNodeVisible(nodeId)) return '';
@@ -1341,44 +1343,59 @@ function assignFriendlyIds(orderArray = null) {
         counter += 1;
     });
 }
-/**
- * Renders the visualization using current map (no fetch).
- * This is the function called by filter/zoom actions.
- */
 function loadAndRenderVisuals(rootOverrideId = null) {
     const vizWrapper = document.getElementById('tree-content-wrapper');
     renderedNodes.clear(); 
+    
+    // First pass: Mark all parent nodes of visible nodes as visible
+    const markParentsVisible = (nodeId) => {
+        let currentId = nodeId;
+        while (parentMap[currentId]) {
+            const parentId = parentMap[currentId];
+            if (!nodeMap[parentId]) break;
+            nodeMap[parentId]._forceVisible = true; // Temporary flag
+            currentId = parentId;
+        }
+    };
+
+    // Mark all visible nodes and their parents
+    for (const nodeId in nodeMap) {
+        if (isNodeVisible(nodeId)) {
+            markParentsVisible(nodeId);
+        }
+    }
+
     vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">Rendering tree...</p>';
 
     let rootNodeId = rootOverrideId || stableRootId || Object.keys(nodeMap)[0];
     if (!rootNodeId || !nodeMap[rootNodeId]) {
-         // Re-fetch map if map is empty but we expect a root (edge case for corruption)
-         if (stableRootId) loadAndRenderTree(); 
-         return;
+        if (stableRootId) loadAndRenderTree(); 
+        return;
     }
     
-    const treeHtml = renderNode(rootNodeId, nodeMap,0);
+    const treeHtml = renderNode(rootNodeId, nodeMap, 0);
     vizWrapper.innerHTML = treeHtml; 
     window.lucide.createIcons();
     
-    // 1. Apply saved zoom level (retains user's zoom)
+    // Clean up temporary flags
+    for (const nodeId in nodeMap) {
+        delete nodeMap[nodeId]._forceVisible;
+    }
+
+    // Rest of the function remains the same...
     applyZoom(currentScale); 
 
-    // 2. Apply Focus after rendering
     if (nodeToFocusId) {
         focusNode(nodeToFocusId);
         nodeToFocusId = null; 
     }
 
-    // 3. Explicitly trigger stat loading for all visible nodes
     for (const id in nodeMap) {
         if(document.getElementById(`node-${id}`)) { 
             updateNodeStats(id);
         }
     }
     
-    // 4. Recalculate horizontal line widths
-    // Use setTimeout to ensure the DOM has settled and sizes are final.
     setTimeout(updateHorizontalLines, 250); 
 }
 
