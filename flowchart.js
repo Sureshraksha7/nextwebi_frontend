@@ -629,38 +629,56 @@ async function deleteNode(contentId, name) {
     try {
         // 1. Get parent ID before deletion
         const parentId = parentMap[contentId];
+        const parentNode = parentId ? nodeMap[parentId] : null;
         
-        // 2. First remove from DOM to immediately reflect the change
+        // 2. First remove the node from DOM to immediately reflect the change
         const nodeElement = document.getElementById(`node-${contentId}`);
         if (nodeElement) {
             const wrapper = nodeElement.closest('.node-wrapper');
             if (wrapper) {
+                // Remove the node and its children
                 wrapper.remove();
             }
         }
 
-        // 3. Then delete from server
+        // 3. Delete from server
         await fetchWithRetry(`/node/delete/${encodeURIComponent(contentId)}`, { 
             method: 'DELETE' 
         });
         
         // 4. Update local state
-        if (parentId && nodeMap[parentId] && nodeMap[parentId].children) {
-            nodeMap[parentId].children = nodeMap[parentId].children.filter(id => id !== contentId);
+        if (parentNode && parentNode.children) {
+            parentNode.children = parentNode.children.filter(id => id !== contentId);
+            
+            // If parent has no more children, remove its children container
+            if (parentNode.children.length === 0) {
+                const parentElement = document.getElementById(`node-${parentId}`);
+                if (parentElement) {
+                    const childrenContainer = parentElement.closest('.node-wrapper')?.querySelector('.tree-container');
+                    if (childrenContainer) {
+                        childrenContainer.remove();
+                    }
+                }
+            }
         }
         
         // 5. Clean up data structures
         delete nodeMap[contentId];
         delete parentMap[contentId];
         
-        // 6. Force update the parent's container to redraw connections
+        // 6. Force update the parent's container to fix connections
         if (parentId) {
-            // Small delay to ensure DOM is updated
-            setTimeout(() => {
+            // Use requestAnimationFrame to ensure DOM updates are complete
+            requestAnimationFrame(() => {
+                // Refresh the entire parent's children container
                 updateParentContainer(parentId);
+                
                 // Also update any horizontal lines
                 updateHorizontalLines();
-            }, 10);
+                
+                // Force a reflow to ensure styles are recalculated
+                document.body.offsetHeight;
+            });
         }
         
         showMessage(`Node "${name}" deleted successfully.`, 'success');
