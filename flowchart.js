@@ -2,7 +2,6 @@
 const API_BASE_URL = "https://nextwebi-backend.onrender.com";
 
 // --- ZOOM/PAN STATE ---
-// Load saved scale from localStorage, default to 1.0 if none found
 let currentScale = parseFloat(localStorage.getItem('currentScale')) || 1.0; 
 const ZOOM_STEP = 0.15;
 const MIN_SCALE = 0.1;
@@ -21,7 +20,6 @@ let isFilterPanelVisible = false;
 const filterPanelContainer = document.getElementById('filter-panel-container');
 const filterToggleButton = document.getElementById('filter-toggle-button');
 // --- END ZOOM/PAN STATE ---
-
 
 // State management
 let retryCount = 0;
@@ -52,7 +50,6 @@ function getStatusClasses(status) {
 }
 
 // --- Utility Functions ---
-
 function getStableColor(str) {
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
@@ -63,6 +60,7 @@ function getStableColor(str) {
     const l = 85; 
     return `hsl(${h}, ${s}%, ${l}%)`;
 }
+
 function getBreadcrumbPath(nodeId) {
     const names = [];
     let currentId = nodeId;
@@ -77,6 +75,7 @@ function getBreadcrumbPath(nodeId) {
 
     return names.reverse().join(' > ');
 }
+
 function buildSubtreeLines(nodeId, prefix = '') {
     const node = nodeMap[nodeId];
     if (!node || !Array.isArray(node.children)) return [];
@@ -98,8 +97,8 @@ function buildSubtreeLines(nodeId, prefix = '') {
     }
     return lines;
 }
+
 function formatTreePath(pathString) {
-    // pathString is like "Dynamic Services > Domestic Services Pages > ... "
     const parts = pathString.split('>').map(p => p.trim()).filter(Boolean);
     if (parts.length === 0) return '';
 
@@ -119,6 +118,7 @@ function formatTreePath(pathString) {
     }
     return lines.join('\n');
 }
+
 // --- Fetch Functions ---
 async function fetchWithRetry(endpoint, options = {}) {
     try {
@@ -172,7 +172,7 @@ function showMessage(message, type) {
 function applyZoom(scale) {
     currentScale = Math.min(Math.max(scale, MIN_SCALE), MAX_SCALE);
     contentWrapper.style.transform = `scale(${currentScale})`;
-    localStorage.setItem('currentScale', currentScale.toFixed(2)); // Save the new scale
+    localStorage.setItem('currentScale', currentScale.toFixed(2));
 }
 
 function zoomIn() {
@@ -228,7 +228,7 @@ function toggleZoomBar() {
     window.lucide.createIcons();
 }
 
-// NEW FUNCTION: Focus/Center the view on a specific node
+// Focus/Center the view on a specific node
 function focusNode(nodeId) {
     const targetElement = document.getElementById(`node-${nodeId}`);
     if (!targetElement) {
@@ -263,11 +263,8 @@ function focusNode(nodeId) {
         }, 1500);
     }, 100); // Increased delay
 }
-// --- END NEW FUNCTION ---
-
 
 // --- Filter Panel Functions ---
-
 function toggleFilterPanel() {
     isFilterPanelVisible = !isFilterPanelVisible;
     
@@ -309,12 +306,14 @@ function isNodeVisible(nodeId) {
 
     return true;
 }
+
 function getFirstUrl(text) {
     if (!text) return null;
     const urlRegex = /(https?:\/\/[^\s]+)/;
     const match = text.match(urlRegex);
     return match ? match[1] : null;
 }
+
 function linkifyDescription(text) {
     if (!text) return "";
     const urlRegex = /(https?:\/\/[^\s]+)/g;
@@ -323,10 +322,8 @@ function linkifyDescription(text) {
         return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="text-blue-600 underline">${url}</a>`;
     });
 }
-// Main Filter Application Logic (Called by input/select change)
-// Main Filter Application Logic (Called by input/select change)
-// Main Filter Application Logic (Called by input/select change)
-// Main Filter Application Logic (Called by input/select change)
+
+// Main Filter Application Logic
 async function applyFilters() {
     const nameInput = document.getElementById('search-filter-input');
     const idInput = document.getElementById('search-id-input');
@@ -364,7 +361,7 @@ async function applyFilters() {
         }
 
         if (foundNodeId) {
-            singleNodeMode = true;                    // show only this node
+            singleNodeMode = true;            // show only this node
             loadAndRenderVisuals(foundNodeId);        // render from that node
             const n = nodeMap[foundNodeId];
             showMessage(
@@ -380,12 +377,6 @@ async function applyFilters() {
     }
 
     // --- 2. No search text: apply connection/status filters on full tree ---
-
-    // For IN/OUT filters, ensure stats are loaded
-    if (connectionFilter === 'inbound' || connectionFilter === 'outbound') {
-        await fetchAllStats();
-    }
-
     const rootId = stableRootId || Object.keys(nodeMap)[0] || null;
     if (!rootId) {
         vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">No nodes to display.</p>';
@@ -398,26 +389,29 @@ async function applyFilters() {
     // Render full tree from root; visibility controlled only by connection/status in isNodeVisible
     loadAndRenderVisuals(rootId);
 }
-// NEW: Function to cache all node stats needed for connection filtering
+
+// Function to cache all node stats needed for connection filtering
 async function fetchAllStats() {
-    // If already cached, don't refetch
-    if (Object.keys(nodeStats).length === Object.keys(nodeMap).length && Object.keys(nodeMap).length > 0) {
+    // If we already have all stats, don't fetch again
+    if (Object.keys(nodeStats).length > 0) {
         return;
     }
 
     try {
-        const allStats = await fetchWithRetry('/stats/all');
-        
+        // Use the new /stats/all endpoint
+        const response = await fetchWithRetry('/stats/all');
+        const allStats = await response.json();
+
         // Update nodeStats with the new data
-        for (const [nodeId, stats] of Object.entries(allStats)) {
+        Object.entries(allStats).forEach(([nodeId, stats]) => {
             nodeStats[nodeId] = {
                 inboundCount: stats.total_inbound_count || 0,
                 outboundCount: stats.total_outbound_count || 0
             };
-        }
+        });
     } catch (e) {
         console.warn('Failed to fetch all stats:', e);
-        // Fallback: set all to 0 but don't block the UI
+        // Initialize with zeros if the request fails
         Object.keys(nodeMap).forEach(id => {
             nodeStats[id] = { inboundCount: 0, outboundCount: 0 };
         });
@@ -467,496 +461,44 @@ async function handleEditSubmit(e) {
     }
 }
 
-// --- Modal Control Functions ---
-
-// Handles link deletion from the Info Modal
-async function deleteRelationFromModal(parentId, childId, parentName, childName) {
-    if (!confirm(`Are you sure you want to delete the link:\n\n${parentName} → ${childName}?\n\nThis will remove the static relationship and all click statistics associated with this link.`)) {
-        return;
-    }
-
-    closeInfoModal(); 
-    showMessage(`Deleting link: ${parentName} → ${childName}...`, 'error');
-
-    try {
-        const options = {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ parentId: parentId, childId: childId })
-        };
-        
-        await fetchWithRetry('/relation/delete', options);
-        
-        showMessage(`Successfully deleted link: ${parentName} → ${childName}. Reloading tree...`, 'success');
-        
-        // Set focus on the node whose detail panel was open (parentId)
-        nodeToFocusId = parentId; 
-        // *** CRITICAL FIX: Must perform full reload after deleting a relation to re-calculate stable hierarchy. ***
-        loadAndRenderTree(); 
-    } catch (error) {
-        showMessage(`Failed to delete link: ${error.message}`, 'error');
-        loadAndRenderTree();
-    }
-}
-
-async function openInfoModal(nodeId) { 
-    const node = nodeMap[nodeId]; 
-    if (!node) return;
-    const statusInfo = getStatusClasses(node.status);
-    
-    // Basic details
-    document.getElementById('info-node-name').textContent = node.name;
-    document.getElementById('info-node-id').textContent = node.contentId;
-
-    const infoDescriptionEl = document.getElementById('info-description');
-    const rawDesc = node.description || '';
-
-    // Show ONLY the link (if any) above, not full description
-    const firstUrl = getFirstUrl(rawDesc);
-    if (firstUrl) {
-        const safeUrl = firstUrl.replace(/"/g, '&quot;');
-        infoDescriptionEl.innerHTML =
-            `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="text-blue-600 underline">${firstUrl}</a>`;
-    } else {
-        // No URL: leave this line empty
-        infoDescriptionEl.innerHTML = '';
-    }
-
-    // Full description in gray box (single place)
-    const fullDescEl = document.getElementById('info-node-description');
-    fullDescEl.textContent = rawDesc || 'No description provided.';
-
-    const statusSpan = document.getElementById('info-node-status');
-    statusSpan.textContent = node.status;
-    statusSpan.className = `px-2 py-0.5 rounded text-xs font-medium ${statusInfo.badge}`;
-
-    // Tree-style path including children
-    const rawPath = getBreadcrumbPath(nodeId);          // "root > ... > current node"
-    const baseTree = formatTreePath(rawPath);           // multi-line tree for that path
-
-    const depth = rawPath.split('>').map(p => p.trim()).filter(Boolean).length;
-    const childPrefix = '      '.repeat(depth);
-    const subtreeLines = buildSubtreeLines(nodeId, childPrefix);
-
-    let finalText = baseTree;
-    if (subtreeLines.length > 0) {
-        finalText += '\n' + subtreeLines.join('\n');
-    }
-
-    const pathEl = document.getElementById('info-path');
-    if (pathEl) {
-        pathEl.textContent = finalText;
-    }
-
-    document.getElementById('info-modal').style.display = 'flex';
-}
-function closeInfoModal() {
-    document.getElementById('info-modal').style.display = 'none';
-}
-async function openInboundSection(nodeId) {
-    await openInfoModal(nodeId);
-    const inboundSection = document.getElementById('inbound-details-display');
-    if (inboundSection) {
-        inboundSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-}
-
-async function openOutboundSection(nodeId) {
-    await openInfoModal(nodeId);
-    const outboundSection = document.getElementById('outbound-details-display');
-    if (outboundSection) {
-        outboundSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-}
-function openEditModal(nodeId) { 
-    const node = nodeMap[nodeId]; 
-    if (!node) return;
-    document.getElementById('edit-node-name-old-display').textContent = node.name;
-    document.getElementById('edit-content-id').value = node.contentId;
-    document.getElementById('edit-name').value = node.name;
-    document.getElementById('edit-description').value = node.description;
-    document.getElementById('edit-status').value = node.status; 
-    document.getElementById('edit-modal').style.display = 'flex';
-}
-function closeEditModal() {
-    document.getElementById('edit-modal').style.display = 'none';
-    document.getElementById('edit-node-form').reset();
-}
-function openDeleteConfirmModal(nodeId) { 
-    const node = nodeMap[nodeId]; 
-    if (!node) return;
-    document.getElementById('delete-node-name').textContent = node.name;
-    const confirmBtn = document.getElementById('confirm-delete-button');
-    confirmBtn.onclick = () => deleteNode(node.contentId, node.name);
-    document.getElementById('delete-confirm-modal').style.display = 'flex';
-}
-function closeDeleteConfirmModal() {
-    document.getElementById('delete-confirm-modal').style.display = 'none';
-}
-function updateTotalNodeCount() {
-    const el = document.getElementById('total-node-count');
-    if (!el) return;
-    const count = Object.keys(nodeMap || {}).length;
-    el.textContent = `Total nodes: ${count}`;
-}
-function openChildModal(parentId, parentName) {
-    document.getElementById('parent-name-display').textContent = parentName;
-    document.getElementById('modal-parent-id').value = parentId;
-    document.getElementById('child-modal').style.display = 'flex';
-}
-function closeChildModal() {
-    document.getElementById('child-modal').style.display = 'none';
-    document.getElementById('create-child-form').reset();
-}
-function openSearchLinkModal(parentId, parentName) {
-    document.getElementById('link-parent-name-display').textContent = parentName;
-    document.getElementById('link-modal-parent-id').value = parentId;
-    document.getElementById('search-results-list').innerHTML = '';
-    document.getElementById('search-input').value = '';
-    document.getElementById('search-status-message').textContent = 'Start searching to find nodes to link.';
-    document.getElementById('confirm-link-button').disabled = true;
-    document.getElementById('search-link-modal').style.display = 'flex';
-}
-async function openInboundDetails(nodeId) {
-    const node = nodeMap[nodeId];
-    if (!node) return;
-
-    try {
-        const inboundData = await fetchWithRetry(`/inbound_stats/${encodeURIComponent(nodeId)}`);
-
-        const overlay = document.createElement('div');
-        overlay.className = 'fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50';
-        overlay.id = 'inbound-popup-overlay';
-
-        const contentHtml = `
-            <div class="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[80vh] overflow-y-auto p-4 border border-gray-200">
-                <div class="flex items-center justify-between mb-2">
-                    <h2 class="text-lg font-semibold text-gray-800">
-                        Inbound Links – ${node.name}
-                    </h2>
-                    <button class="text-gray-500 hover:text-gray-700 text-sm px-2 py-1 rounded"
-                            onclick="document.getElementById('inbound-popup-overlay')?.remove()">
-                        ✕
-                    </button>
-                </div>
-                <p class="text-sm text-gray-700 mb-2">
-                    Total inbound clicks:
-                    <span class="font-bold">${inboundData.total_inbound_count}</span>
-                </p>
-                <h3 class="text-sm font-semibold text-gray-700 mb-2">Inbound Node List:</h3>
-                ${
-                    inboundData.inbound_connections.length === 0
-                        ? '<p class="text-xs text-gray-500 italic mb-2">No inbound connections recorded.</p>'
-                        : inboundData.inbound_connections.map(conn => {
-                            const source = nodeMap[conn.sourceId] || {};
-                            const desc = linkifyDescription(source.description || 'No description.');
-
-                            return `
-                                <div class="mb-2 p-2 rounded-lg border border-gray-200 bg-gray-50">
-                                    <p class="text-sm font-medium text-gray-800">
-                                        ${source.name || 'Unknown'} (${conn.count} clicks)
-                                    </p>
-                                    <p class="text-xs text-gray-600">
-                                        Status: ${source.status || 'N/A'} |
-                                        ID: ${(source.contentId || '').substring(0,8)}...
-                                    </p>
-                                    <p class="text-xs text-gray-600 mt-0.5">${desc}</p>
-                                </div>
-                            `;
-                        }).join('')
-                }
-            </div>
-        `;
-
-        overlay.innerHTML = contentHtml;
-        document.body.appendChild(overlay);
-    } catch (e) {
-        alert('Failed to load inbound details: ' + e.message);
-    }
-}
-
-async function openOutboundDetails(nodeId) {
-    const node = nodeMap[nodeId];
-    if (!node) return;
-
-    try {
-        const outboundData = await fetchWithRetry(`/outbound_stats/${encodeURIComponent(nodeId)}`);
-
-        const overlay = document.createElement('div');
-        overlay.className = 'fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50';
-        overlay.id = 'outbound-popup-overlay';
-
-        const contentHtml = `
-            <div class="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[80vh] overflow-y-auto p-4 border border-gray-200">
-                <div class="flex items-center justify-between mb-2">
-                    <h2 class="text-lg font-semibold text-gray-800">
-                        Outbound Links – ${node.name}
-                    </h2>
-                    <button class="text-gray-500 hover:text-gray-700 text-sm px-2 py-1 rounded"
-                            onclick="document.getElementById('outbound-popup-overlay')?.remove()">
-                        ✕
-                    </button>
-                </div>
-                <p class="text-sm text-gray-700 mb-2">
-                    Total outbound clicks:
-                    <span class="font-bold">${outboundData.total_outbound_count}</span>
-                </p>
-                <h3 class="text-sm font-semibold text-gray-700 mb-2">Out-bound Node List:</h3>
-                ${
-                    outboundData.outbound_connections.length === 0
-                        ? '<p class="text-xs text-gray-500 italic mb-2">No outbound connections recorded.</p>'
-                        : outboundData.outbound_connections.map(conn => {
-                            const target = nodeMap[conn.targetId] || {};
-                            const desc = linkifyDescription(target.description || 'No description.');
-
-                            return `
-                                <div class="mb-2 p-2 rounded-lg border border-gray-200 bg-gray-50">
-                                    <p class="text-sm font-medium text-gray-800">
-                                        ${target.name || 'Unknown'} (${conn.count} clicks)
-                                    </p>
-                                    <p class="text-xs text-gray-600">
-                                        Status: ${target.status || 'N/A'} |
-                                        ID: ${(target.contentId || '').substring(0,8)}...
-                                    </p>
-                                    <p class="text-xs text-gray-600 mt-0.5">${desc}</p>
-                                </div>
-                            `;
-                        }).join('')
-                }
-            </div>
-        `;
-
-        overlay.innerHTML = contentHtml;
-        document.body.appendChild(overlay);
-    } catch (e) {
-        alert('Failed to load outbound details: ' + e.message);
-    }
-}
-function closeSearchLinkModal() {
-    document.getElementById('search-link-modal').style.display = 'none';
-}
-async function handleSearch() {
-    const parentId = document.getElementById('link-modal-parent-id').value;
-    const searchTerm = document.getElementById('search-input').value.trim();
-    const resultsList = document.getElementById('search-results-list');
-    const statusMsg = document.getElementById('search-status-message');
-
-    resultsList.innerHTML = '';
-
-    if (searchTerm.length < 3) {
-        statusMsg.textContent = 'Please enter at least 3 characters to search.';
-        document.getElementById('confirm-link-button').disabled = true;
-        return;
-    }
-
-    statusMsg.textContent = 'Searching...';
-
-    try {
-        const safeSearchTerm = searchTerm.replace(/\s/g, '_');
-
-        // Use generic search – includes existing children
-        const endpoint = `/node/search/${encodeURIComponent(safeSearchTerm)}`;
-
-        const results = await fetchWithRetry(endpoint);
-        statusMsg.textContent = '';
-        document.getElementById('confirm-link-button').disabled = false;
-
-        results.forEach(node => {
-            // Skip linking the node to itself
-            if (node.contentId === parentId) {
-                return;
-            }
-
-            nodeMap[node.contentId] = node;
-            const breadcrumb = getBreadcrumbPath(node.contentId);
-
-            const listItem = document.createElement('li');
-            listItem.className = 'flex items-start p-2 bg-white rounded-lg shadow-sm border border-gray-100';
-            listItem.innerHTML = `
-                <input type="checkbox" id="link-node-${node.contentId}" name="link-node" value="${node.contentId}" 
-                        class="mt-1 mr-3 h-4 w-4 text-green-600 border-gray-300 rounded focus:ring-green-500">
-                <label for="link-node-${node.contentId}" class="flex-1 cursor-pointer">
-                    <span class="font-semibold text-sm text-gray-800">${node.name}</span> 
-                    <span class="text-xs text-gray-500">(${node.status})</span><br>
-                    <span class="text-xs text-gray-600 truncate block">${node.description || 'No description.'}</span>
-                    <span class="text-[10px] text-gray-400 truncate block mt-0.5">${breadcrumb}</span>
-                </label>
-            `;
-            resultsList.appendChild(listItem);
-        });
-    } catch (error) {
-        statusMsg.textContent = error.message.includes('404') 
-            ? `No matching, unrelated nodes found for "${searchTerm}".` 
-            : `Search failed: ${error.message}`;
-        document.getElementById('confirm-link-button').disabled = true;
-    }
-}
-
-async function handleLinkSelected() {
-    const parentId = document.getElementById('link-modal-parent-id').value;
-    const parentName = nodeMap[parentId].name;
-    const checkboxes = document.querySelectorAll('#search-results-list input[name="link-node"]:checked');
-    
-    if (checkboxes.length === 0) {
-        showMessage('No nodes selected for linking.', 'error');
-        return;
-    }
-    
-    closeSearchLinkModal(); 
-    let successCount = 0;
-    
-    // Collect IDs of nodes whose stats need updating
-    const nodesToUpdate = new Set([parentId]);
-    
-    for (const checkbox of checkboxes) {
-    const childId = checkbox.value;
-    const childName = nodeMap[childId] ? nodeMap[childId].name : 'Unknown Node';
-
-    try {
-        showMessage(`1/2: Creating static link ${parentName} → ${childName}...`, 'info');
-
-        // Step 1: Create or confirm the Static Relationship (idempotent)
-        const relationOptions = {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ parentId: parentId, childId: childId })
-        };
-
-        try {
-            await fetchWithRetry('/relation/create', relationOptions);
-        } catch (e) {
-            // If relationship already exists, ignore and continue to record click
-            if (!e.message.includes('Relationship exists')) {
-                throw e;  // real error
-            }
-        }
-
-        // Step 2: Record a "Click" (updates IN/OUT counters even for existing links)
-        showMessage(`2/2: Recording initial click to update IN/OUT counters...`, 'info');
-        const clickOptions = {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sourceId: parentId, targetId: childId })
-        };
-        await fetchWithRetry('/link/click', clickOptions);
-
-        nodesToUpdate.add(childId);
-        successCount++;
-    } catch (error) {
-        showMessage(`Failed to link ${childName}: ${error.message}`, 'error');
-    }
-}
-    
-    if (successCount > 0) {
-        showMessage(`Successfully linked ${successCount} node(s) to ${parentName}. Updating view...`, 'success');
-        
-        // Re-render the visuals to update stat badges/data and maintain zoom/position
-        nodeToFocusId = parentId;
-        // *** CRITICAL FIX: Use loadAndRenderTree for full hierarchy refresh ***
-        loadAndRenderTree(); 
-
-    } else {
-        showMessage('No new links were successfully created.', 'error');
-    }
-}
-
-// NEW FUNCTION: Applies colors to the IN/OUT counts based on value (0 or >0)
-function applyStatColors(nodeId) {
-    const inboundSpan = document.getElementById(`inbound-stat-${nodeId}`);
-    const outboundSpan = document.getElementById(`outbound-stat-${nodeId}`);
-    
-    if (inboundSpan) {
-        if (parseInt(inboundSpan.textContent) > 0) {
-            inboundSpan.classList.add('inbound-active');
-        } else {
-            inboundSpan.classList.add('inbound-inactive');
-        }
-    }
-    
-    if (outboundSpan) {
-        if (parseInt(outboundSpan.textContent) > 0) {
-            outboundSpan.classList.add('outbound-active');
-        } else {
-            outboundSpan.classList.add('outbound-inactive');
-        }
-    }
-}
-
-
-// --- NEW FUNCTION: Fetch and Update Click Stats for a single node with retries ---
+// Update Node Stats Display
 async function updateNodeStats(nodeId) {
+    // No need to fetch individual stats anymore as we get all at once
+    if (!nodeStats[nodeId]) {
+        // Initialize with zeros if not in our stats yet
+        nodeStats[nodeId] = { inboundCount: 0, outboundCount: 0 };
+    }
+    
+    const stats = nodeStats[nodeId];
+    const inboundCount = stats.inboundCount || 0;
+    const outboundCount = stats.outboundCount || 0;
+    
     const statsDiv = document.getElementById(`stats-${nodeId}`);
     if (!statsDiv) return;
-    
-    // Set loading state immediately
-    statsDiv.innerHTML = '<span class="text-gray-400 text-[8px] italic">Loading stats...</span>';
-    
-    let inboundCount = 0;
-    let outboundCount = 0;
-    const MAX_STAT_RETRIES = 3; 
 
-    // --- Fetch Stats with Retries ---
-    for (let i = 0; i < MAX_STAT_RETRIES; i++) {
-        try {
-            // Attempt to fetch both inbound and outbound data
-            const inboundData = await fetchWithRetry(`/inbound_stats/${encodeURIComponent(nodeId)}`);
-            const outboundData = await fetchWithRetry(`/outbound_stats/${encodeURIComponent(nodeId)}`);
+    // Update the stats display
+    statsDiv.innerHTML = `
+        <div class="flex justify-around text-xs font-bold pt-1 border-t border-gray-300 mt-1">
+            <button type="button"
+                    class="text-gray-700 focus:outline-none"
+                    onclick="openInboundDetails('${nodeId}')">
+                IN:
+                <span id="inbound-stat-${nodeId}" class="inbound-stat ml-1">${inboundCount}</span>
+            </button>
+            <button type="button"
+                    class="text-gray-700 focus:outline-none"
+                    onclick="openOutboundDetails('${nodeId}')">
+                OUT:
+                <span id="outbound-stat-${nodeId}" class="outbound-stat ml-1">${outboundCount}</span>
+            </button>
+        </div>
+    `;
 
-            inboundCount = inboundData.total_inbound_count;
-            outboundCount = outboundData.total_outbound_count;
-            
-            // Cache stats for filtering logic
-            nodeStats[nodeId] = { inboundCount, outboundCount }; 
-            
-            // If data is successfully fetched, break the loop
-            break; 
-
-        } catch (error) {
-            // If it's the last attempt and it failed, log the error
-            if (i === MAX_STAT_RETRIES - 1) {
-                console.error(`Failed to load stats for ${nodeId} after ${MAX_STAT_RETRIES} attempts.`, error);
-                statsDiv.innerHTML = '<span class="text-red-500 text-[8px]">Stats Error</span>';
-                return;
-            }
-            // Wait briefly before retrying
-            await new Promise(resolve => setTimeout(resolve, 500)); 
-        }
-    }
-    
-    // --- Final Display ---
-    // MODIFIED: Use new class structure for styling.
-        statsDiv.innerHTML = `
-            <div class="flex justify-around text-xs font-bold pt-1 border-t border-gray-300 mt-1">
-                <button type="button"
-                        class="text-gray-700 focus:outline-none"
-                        onclick="openInboundDetails('${nodeId}')">
-                    IN:
-                    <span id="inbound-stat-${nodeId}" class="inbound-stat ml-1">${inboundCount}</span>
-                </button>
-                <button type="button"
-                        class="text-gray-700 focus:outline-none"
-                        onclick="openOutboundDetails('${nodeId}')">
-                    OUT:
-                    <span id="outbound-stat-${nodeId}" class="outbound-stat ml-1">${outboundCount}</span>
-                </button>
-            </div>
-        `;
-
-    // --- Schedule CSS coloring after DOM update ---
+    // Apply color coding
     setTimeout(() => applyStatColors(nodeId), 50);
-
-    // Recalculate horizontal lines after this node’s width may have changed
-    setTimeout(updateHorizontalLines, 0);
 }
 
-
 // --- Node Rendering Logic ---
-
-/**
- * Renders a single node card and its children recursively.
- */
-// --- Node Rendering Logic ---
-
 function renderNode(nodeId, nodeMap, level = 0) {
     const node = nodeMap[nodeId];
 
@@ -964,7 +506,7 @@ function renderNode(nodeId, nodeMap, level = 0) {
         return '';
     }
 
-    // --- CRITICAL FILTER CHECK ---
+    // CRITICAL FILTER CHECK
     if (!isNodeVisible(nodeId)) {
         return '';
     }
@@ -1088,10 +630,7 @@ function renderNode(nodeId, nodeMap, level = 0) {
         </div>
     `;
 }
-/**
- * Fetches the entire graph structure and renders the tree starting from the root.
- * This is the function we want to minimize calling, but it's necessary for structural changes.
- */
+
 /**
  * Fetches the entire graph structure and renders the tree starting from the root.
  * This is the function we want to minimize calling, but it's necessary for structural changes.
@@ -1146,7 +685,7 @@ async function loadAndRenderTree() {
         const rootName = nodeMap[rootNodeId].name;
         
         // 3. Render visuals (uses loadAndRenderVisuals to handle zoom/focus logic)
-        loadAndRenderVisuals(rootNodeId);
+        await loadAndRenderVisuals(rootNodeId);
 
         // 4. Initial Scroll/Reset (Only if no focus node was requested by DML actions)
         if (!nodeToFocusId) {
@@ -1160,6 +699,7 @@ async function loadAndRenderTree() {
         console.error("Tree loading failed:", error);
     }
 }
+
 function assignFriendlyIds(orderArray = null) {
     // If we have an explicit order (e.g. /tree response), use that.
     // Otherwise, fall back to current nodeMap insertion order.
@@ -1183,11 +723,12 @@ function assignFriendlyIds(orderArray = null) {
         counter += 1;
     });
 }
+
 /**
  * Renders the visualization using current map (no fetch).
  * This is the function called by filter/zoom actions.
  */
-function loadAndRenderVisuals(rootOverrideId = null) {
+async function loadAndRenderVisuals(rootOverrideId = null) {
     const vizWrapper = document.getElementById('tree-content-wrapper');
     renderedNodes.clear(); 
     vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">Rendering tree...</p>';
@@ -1199,59 +740,33 @@ function loadAndRenderVisuals(rootOverrideId = null) {
          return;
     }
     
-    const treeHtml = renderNode(rootNodeId, nodeMap,0);
+    // Load all stats before rendering
+    await fetchAllStats();
+    
+    const treeHtml = renderNode(rootNodeId, nodeMap, 0);
     vizWrapper.innerHTML = treeHtml; 
     window.lucide.createIcons();
     
-    // 1. Apply saved zoom level (retains user's zoom)
+    // Apply saved zoom level
     applyZoom(currentScale); 
 
-    // 2. Apply Focus after rendering
+    // Apply focus after rendering
     if (nodeToFocusId) {
         focusNode(nodeToFocusId);
         nodeToFocusId = null; 
     }
 
-    // 3. Explicitly trigger stat loading for all visible nodes
+    // Update stats for all visible nodes
     for (const id in nodeMap) {
-        if(document.getElementById(`node-${id}`)) { 
+        if (document.getElementById(`node-${id}`)) { 
             updateNodeStats(id);
         }
     }
     
-    // 4. Recalculate horizontal line widths
-    // Use setTimeout to ensure the DOM has settled and sizes are final.
+    // Recalculate horizontal lines
     setTimeout(updateHorizontalLines, 250); 
 }
 
-/**
- * Calculates the width for the horizontal line based on center-to-center distance.
- */
-// function updateHorizontalLines() {
-//     document.querySelectorAll(".tree-container").forEach(container => {
-//         const children = container.children;
-        
-//         // Skip if less than 2 children (single child case is handled by CSS class)
-//         if (children.length < 2) return; 
-
-//         // 1. Get the center of the first child's wrapper
-//         const firstChild = children[0];
-//         const firstCenter = firstChild.offsetLeft + (firstChild.offsetWidth / 2);
-
-//         // 2. Get the center of the last child's wrapper
-//         const lastChild = children[children.length - 1];
-//         const lastCenter = lastChild.offsetLeft + (lastChild.offsetWidth / 2);
-
-//         // 3. Calculate the line span (center-to-center)
-//         const lineSpan = lastCenter - firstCenter;
-
-//         // FIX: Use exactly the center-to-center distance. The CSS translateX will handle the final pixel perfect alignment.
-//         container.style.setProperty("--children-width", lineSpan + "px"); 
-//     });
-// }
-
-
-// --- Event Listeners (FIXED) ---
 function updateHorizontalLines() {
     document.querySelectorAll(".tree-container").forEach(container => {
         const children = container.children;
@@ -1262,7 +777,7 @@ function updateHorizontalLines() {
         const firstChild = children[0];
         const lastChild = children[children.length - 1];
 
-        // Centers within the container’s coordinate system
+        // Centers within the container's coordinate system
         const start = firstChild.offsetLeft + (firstChild.offsetWidth / 2);
         const end   = lastChild.offsetLeft  + (lastChild.offsetWidth  / 2);
 
@@ -1270,8 +785,9 @@ function updateHorizontalLines() {
         container.style.setProperty("--line-end",   end   + "px");
     });
 }
+
 function getLevelColor(level) {
-    // “Endless” cycle of pleasant HSL colors based on level
+    // "Endless" cycle of pleasant HSL colors based on level
     const hue = (level * 57 + 137) % 360;  // spreads hues around the wheel
     const saturation = 55;
     const lightness = 70;
@@ -1315,12 +831,11 @@ document.addEventListener('DOMContentLoaded', () => {
             
             showMessage(`Child '${childName}' added and linked successfully.`, 'success');
             
-            // --- CRITICAL FIX: Set focus ID and reload to reflect new structure and keep position ---
+            // Set focus to the new node and reload to reflect new structure
             if (childId) {
-                nodeToFocusId = childId; // Set focus to the new node
+                nodeToFocusId = childId;
             }
-            loadAndRenderTree(); 
- // Necessary full refresh to update hierarchy
+            loadAndRenderTree(); // Necessary full refresh to update hierarchy
             
         } catch (error) {
             showMessage(`Failed to create or link child node: ${error.message}.`, 'error');
