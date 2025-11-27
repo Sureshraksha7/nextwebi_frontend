@@ -398,7 +398,7 @@ async function applyFilters() {
     // Render full tree from root; visibility controlled only by connection/status in isNodeVisible
     loadAndRenderVisuals(rootId);
 }
-// NEW: Function to cache all node stats needed for connection filtering
+// Optimized function to fetch all node stats in a single request
 async function fetchAllStats() {
     // If we already have all stats, don't fetch again
     if (Object.keys(nodeStats).length > 0) {
@@ -412,24 +412,14 @@ async function fetchAllStats() {
 
         // Update nodeStats with the new data
         Object.entries(allStats).forEach(([nodeId, stats]) => {
-            if (nodeMap[nodeId]) {  // Only include nodes that exist in our map
-                nodeStats[nodeId] = {
-                    inboundCount: stats.total_inbound_count || 0,
-                    outboundCount: stats.total_outbound_count || 0
-                };
-            }
-        });
-        
-        // Initialize stats for nodes not in the response
-        Object.keys(nodeMap).forEach(id => {
-            if (!nodeStats[id]) {
-                nodeStats[id] = { inboundCount: 0, outboundCount: 0 };
-            }
+            nodeStats[nodeId] = {
+                inboundCount: stats.total_inbound_count || 0,
+                outboundCount: stats.total_outbound_count || 0
+            };
         });
     } catch (e) {
         console.warn('Failed to fetch all stats:', e);
         // Initialize with zeros if the request fails
-        nodeStats = {};
         Object.keys(nodeMap).forEach(id => {
             nodeStats[id] = { inboundCount: 0, outboundCount: 0 };
         });
@@ -439,15 +429,14 @@ async function fetchAllStats() {
 async function deleteNode(contentId, name) {
     closeDeleteConfirmModal();
     try {
-        await fetchWithRetry(`/node/delete/${encodeURIComponent(contentId)}`, { 
-            method: 'DELETE' 
-        }); 
+        await fetchWithRetry(`/node/delete/${encodeURIComponent(contentId)}`, { method: 'DELETE' }); 
         showMessage(`Node '${name}' deleted successfully.`, 'success');
-        loadAndRenderTree(); // Full reload to update the tree structure
+        loadAndRenderTree(); // Must perform full reload after delete
     } catch (error) {
         showMessage(`Failed to delete node: ${error.message}`, 'error');
     }
 }
+
 async function handleEditSubmit(e) {
     e.preventDefault();
     const contentId = document.getElementById('edit-content-id').value;
@@ -897,48 +886,70 @@ function applyStatColors(nodeId) {
 
 // --- NEW FUNCTION: Fetch and Update Click Stats for a single node with retries ---
 async function updateNodeStats(nodeId) {
-    // If we already have stats for this node, use them
-    if (nodeStats[nodeId]) {
-        updateNodeStatsUI(nodeId, nodeStats[nodeId].inboundCount, nodeStats[nodeId].outboundCount);
-        return;
-    }
-
-    // If we don't have stats yet, fetch all stats
-    await fetchAllStats();
-    
-    // Try again with the updated stats
-    if (nodeStats[nodeId]) {
-        updateNodeStatsUI(nodeId, nodeStats[nodeId].inboundCount, nodeStats[nodeId].outboundCount);
-    } else {
-        // If still no stats, set to 0
-        updateNodeStatsUI(nodeId, 0, 0);
-    }
-}
-
-function updateNodeStatsUI(nodeId, inboundCount, outboundCount) {
     const statsDiv = document.getElementById(`stats-${nodeId}`);
     if (!statsDiv) return;
+    
+    // Set loading state immediately
+    statsDiv.innerHTML = '<span class="text-gray-400 text-[8px] italic">Loading stats...</span>';
+    
+    let inboundCount = 0;
+    let outboundCount = 0;
+    const MAX_STAT_RETRIES = 3; 
 
-    statsDiv.innerHTML = `
-        <div class="flex justify-around text-xs font-bold pt-1 border-t border-gray-300 mt-1">
-            <button type="button"
-                    class="text-gray-700 focus:outline-none"
-                    onclick="openInboundDetails('${nodeId}')">
-                IN:
-                <span id="inbound-stat-${nodeId}" class="inbound-stat ml-1">${inboundCount}</span>
-            </button>
-            <button type="button"
-                    class="text-gray-700 focus:outline-none"
-                    onclick="openOutboundDetails('${nodeId}')">
-                OUT:
-                <span id="outbound-stat-${nodeId}" class="outbound-stat ml-1">${outboundCount}</span>
-            </button>
-        </div>
-    `;
+    // --- Fetch Stats with Retries ---
+    for (let i = 0; i < MAX_STAT_RETRIES; i++) {
+        try {
+            // Attempt to fetch both inbound and outbound data
+            const inboundData = await fetchWithRetry(`/inbound_stats/${encodeURIComponent(nodeId)}`);
+            const outboundData = await fetchWithRetry(`/outbound_stats/${encodeURIComponent(nodeId)}`);
 
-    // Apply color coding
+            inboundCount = inboundData.total_inbound_count;
+            outboundCount = outboundData.total_outbound_count;
+            
+            // Cache stats for filtering logic
+            nodeStats[nodeId] = { inboundCount, outboundCount }; 
+            
+            // If data is successfully fetched, break the loop
+            break; 
+
+        } catch (error) {
+            // If it's the last attempt and it failed, log the error
+            if (i === MAX_STAT_RETRIES - 1) {
+                console.error(`Failed to load stats for ${nodeId} after ${MAX_STAT_RETRIES} attempts.`, error);
+                statsDiv.innerHTML = '<span class="text-red-500 text-[8px]">Stats Error</span>';
+                return;
+            }
+            // Wait briefly before retrying
+            await new Promise(resolve => setTimeout(resolve, 500)); 
+        }
+    }
+    
+    // --- Final Display ---
+    // MODIFIED: Use new class structure for styling.
+        statsDiv.innerHTML = `
+            <div class="flex justify-around text-xs font-bold pt-1 border-t border-gray-300 mt-1">
+                <button type="button"
+                        class="text-gray-700 focus:outline-none"
+                        onclick="openInboundDetails('${nodeId}')">
+                    IN:
+                    <span id="inbound-stat-${nodeId}" class="inbound-stat ml-1">${inboundCount}</span>
+                </button>
+                <button type="button"
+                        class="text-gray-700 focus:outline-none"
+                        onclick="openOutboundDetails('${nodeId}')">
+                    OUT:
+                    <span id="outbound-stat-${nodeId}" class="outbound-stat ml-1">${outboundCount}</span>
+                </button>
+            </div>
+        `;
+
+    // --- Schedule CSS coloring after DOM update ---
     setTimeout(() => applyStatColors(nodeId), 50);
+
+    // Recalculate horizontal lines after this node’s width may have changed
+    setTimeout(updateHorizontalLines, 0);
 }
+
 
 // --- Node Rendering Logic ---
 
@@ -1177,56 +1188,43 @@ function assignFriendlyIds(orderArray = null) {
  * Renders the visualization using current map (no fetch).
  * This is the function called by filter/zoom actions.
  */
-async function loadAndRenderVisuals(rootOverrideId = null) {
+function loadAndRenderVisuals(rootOverrideId = null) {
     const vizWrapper = document.getElementById('tree-content-wrapper');
-    if (!vizWrapper) return;
-    
     renderedNodes.clear(); 
     vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">Rendering tree...</p>';
 
     let rootNodeId = rootOverrideId || stableRootId || Object.keys(nodeMap)[0];
     if (!rootNodeId || !nodeMap[rootNodeId]) {
-        if (stableRootId) {
-            await loadAndRenderTree();
-        }
-        return;
+         // Re-fetch map if map is empty but we expect a root (edge case for corruption)
+         if (stableRootId) loadAndRenderTree(); 
+         return;
     }
     
-    try {
-        // Fetch all stats before rendering
-        await fetchAllStats();
-        
-        const treeHtml = renderNode(rootNodeId, nodeMap, 0);
-        vizWrapper.innerHTML = treeHtml; 
-        window.lucide.createIcons();
-        
-        // Apply saved zoom level
-        applyZoom(currentScale); 
+    const treeHtml = renderNode(rootNodeId, nodeMap,0);
+    vizWrapper.innerHTML = treeHtml; 
+    window.lucide.createIcons();
+    
+    // 1. Apply saved zoom level (retains user's zoom)
+    applyZoom(currentScale); 
 
-        // Apply focus after rendering
-        if (nodeToFocusId) {
-            focusNode(nodeToFocusId);
-            nodeToFocusId = null; 
-        }
-
-        // Update stats for all visible nodes (from cache)
-        for (const id in nodeMap) {
-            if (document.getElementById(`node-${id}`)) { 
-                updateNodeStatsUI(
-                    id, 
-                    nodeStats[id]?.inboundCount || 0, 
-                    nodeStats[id]?.outboundCount || 0
-                );
-            }
-        }
-        
-        // Recalculate horizontal lines
-        setTimeout(updateHorizontalLines, 250);
-    } catch (error) {
-        console.error("Error in loadAndRenderVisuals:", error);
-        vizWrapper.innerHTML = '<p class="text-center text-red-500 italic p-10">Error rendering tree. Please try refreshing the page.</p>';
+    // 2. Apply Focus after rendering
+    if (nodeToFocusId) {
+        focusNode(nodeToFocusId);
+        nodeToFocusId = null; 
     }
+
+    // 3. Explicitly trigger stat loading for all visible nodes
+    for (const id in nodeMap) {
+        if(document.getElementById(`node-${id}`)) { 
+            updateNodeStats(id);
+        }
+    }
+    
+    // 4. Recalculate horizontal line widths
+    // Use setTimeout to ensure the DOM has settled and sizes are final.
+    setTimeout(updateHorizontalLines, 250); 
 }
+
 /**
  * Calculates the width for the horizontal line based on center-to-center distance.
  */
