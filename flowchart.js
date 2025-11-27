@@ -403,14 +403,10 @@ async function applyFilters() {
 async function fetchAllStats() {
     try {
         console.log('Fetching all stats...');
-        // Remove the .json() call since fetchWithRetry already parses the JSON
         const allStats = await fetchWithRetry('/stats/all');
         
         // Clear existing stats
         nodeStats = {};
-        
-        // Debug log to see what we received
-        console.log('Received stats from server:', allStats);
         
         // Update the nodeStats cache
         if (allStats && typeof allStats === 'object') {
@@ -420,11 +416,8 @@ async function fetchAllStats() {
                     outboundCount: stats.total_outbound_count || 0
                 };
             });
-        } else {
-            console.warn('Unexpected stats format:', allStats);
         }
         
-        console.log('Updated nodeStats:', nodeStats);
         return nodeStats;
     } catch (e) {
         console.error('Error in fetchAllStats:', e);
@@ -923,13 +916,10 @@ function updateNodeStats(nodeId) {
         `;
     }
 }
-
 function updateVisibleNodeStats() {
-    console.log('Updating visible node stats...');
     // Only update stats for nodes that are currently in the DOM
     document.querySelectorAll('[id^="node-"]').forEach(nodeElement => {
         const nodeId = nodeElement.id.replace('node-', '');
-        console.log('Updating stats for node:', nodeId);
         updateNodeStats(nodeId);
     });
 }
@@ -1122,10 +1112,18 @@ function renderNode(nodeId, nodeMap, level = 0) {
  */
 async function loadAndRenderTree() {
     const vizWrapper = document.getElementById('tree-content-wrapper');
-    vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">Loading tree structure...</p>';
+    if (!vizWrapper) return; // Safety check
+    
+    // Show loading state
+    vizWrapper.innerHTML = '<div class="flex justify-center items-center h-full"><div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div></div>';
     
     try {
-        // 1. Fetch the tree structure
+        // Clear previous state
+        renderedNodes.clear();
+        nodeMap = {};
+        parentMap = {};
+
+        // Fetch the tree structure
         const response = await fetchWithRetry('/tree');
         
         if (!response || response.length === 0) {
@@ -1133,51 +1131,62 @@ async function loadAndRenderTree() {
             return;
         }
 
-        // 2. Build node and parent maps
-        nodeMap = {};
-        parentMap = {};
-        
+        // Build node and parent maps
         response.forEach(node => {
             nodeMap[node.contentId] = { ...node };
         });
 
-        // Build parentMap: childId -> parentId
+        // Build parentMap
         response.forEach(node => {
             if (Array.isArray(node.children)) {
                 node.children.forEach(childId => {
-                    if (childId) {
+                    if (childId && nodeMap[childId]) {
                         parentMap[childId] = node.contentId;
                     }
                 });
             }
         });
 
-        // 3. Assign friendly IDs
+        // Assign friendly IDs
         assignFriendlyIds(response);
         updateTotalNodeCount();
 
-        // 4. Identify the root node
-        let rootNodeId = response[0]?.contentId;
+        // Identify root node
+        const rootNodeId = response[0]?.contentId;
         if (!rootNodeId) {
             throw new Error('No root node found');
         }
         stableRootId = rootNodeId;
 
-        // 5. Fetch all stats before rendering
+        // Load all stats before rendering
         await fetchAllStats();
         
-        // 6. Now render the tree with the stats
+        // Render the tree
         const treeHtml = renderNode(rootNodeId, nodeMap, 0);
         vizWrapper.innerHTML = treeHtml;
         window.lucide.createIcons();
         
-        // 7. Apply zoom and other UI updates
+        // Apply zoom and focus
         applyZoom(currentScale);
+        if (nodeToFocusId) {
+            focusNode(nodeToFocusId);
+            nodeToFocusId = null;
+        }
+        
+        // Update horizontal lines after a short delay
         setTimeout(updateHorizontalLines, 50);
         
     } catch (error) {
         console.error("Tree loading failed:", error);
-        vizWrapper.innerHTML = '<p class="text-center text-red-500 italic p-10">Error loading graph. Please check console for details.</p>';
+        vizWrapper.innerHTML = `
+            <div class="text-center p-10">
+                <p class="text-red-500 font-medium">Error loading tree:</p>
+                <p class="text-gray-600 text-sm mt-2">${error.message}</p>
+                <button onclick="loadAndRenderTree()" class="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors">
+                    Retry
+                </button>
+            </div>
+        `;
     }
 }
 function assignFriendlyIds(orderArray = null) {
@@ -1309,50 +1318,77 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Event listener for adding a new child node
     document.getElementById('create-child-form').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const parentId = document.getElementById('modal-parent-id').value;
-        const parentName = nodeMap[parentId].name;
+    e.preventDefault();
+    
+    const parentId = document.getElementById('modal-parent-id').value;
+    const parentName = nodeMap[parentId]?.name || 'Parent';
+    const childName = document.getElementById('child-name').value.trim();
+    const childDescription = document.getElementById('child-description').value.trim();
 
-        const childName = document.getElementById('child-name').value.trim();
-        const childDescription = document.getElementById('child-description').value.trim();
+    if (!childName) {
+        showMessage('Please enter a name for the new node', 'error');
+        return;
+    }
 
-        closeChildModal(); 
+    closeChildModal();
+    
+    try {
+        // Show loading state
+        const vizWrapper = document.getElementById('tree-content-wrapper');
+        vizWrapper.innerHTML = '<div class="flex justify-center items-center h-full"><div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div></div>';
+
+        // 1. Create the Child Node
+        showMessage(`Creating node '${childName}'...`, 'info');
+        const nodeOptions = {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                name: childName, 
+                description: childDescription, 
+                status: 'New' 
+            })
+        };
         
-        let childId = null;
-        try {
-            // 1. Create the Child Node
-            showMessage(`1/2: Creating new node '${childName}'...`, 'info');
-            const nodeOptions = {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: childName, description: childDescription, status: 'New' })
-            };
-            const childResult = await fetchWithRetry('/node/create', nodeOptions);
-            childId = childResult.contentId;
-            
-            // 2. Create the Relationship
-            showMessage(`2/2: Linking '${parentName}' to '${childName}'...`, 'info');
-            const relationOptions = {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ parentId: parentId, childId: childId })
-            };
-            await fetchWithRetry('/relation/create', relationOptions);
-            
-            showMessage(`Child '${childName}' added and linked successfully.`, 'success');
-            
-            // --- CRITICAL FIX: Set focus ID and reload to reflect new structure and keep position ---
-            if (childId) {
-                nodeToFocusId = childId; // Set focus to the new node
-            }
-            loadAndRenderTree(); 
- // Necessary full refresh to update hierarchy
-            
-        } catch (error) {
-            showMessage(`Failed to create or link child node: ${error.message}.`, 'error');
-            loadAndRenderTree(); // Fallback to full refresh on failure
+        const childResult = await fetchWithRetry('/node/create', nodeOptions);
+        const childId = childResult.contentId;
+        
+        if (!childId) {
+            throw new Error('Failed to create node: No ID returned');
         }
-    });
+
+        // 2. Create the Relationship
+        showMessage(`Linking '${parentName}' to '${childName}'...`, 'info');
+        const relationOptions = {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ parentId, childId })
+        };
+        
+        await fetchWithRetry('/relation/create', relationOptions);
+        
+        // 3. Clear the form
+        document.getElementById('child-name').value = '';
+        document.getElementById('child-description').value = '';
+        
+        // 4. Set focus to the new node and reload
+        nodeToFocusId = childId;
+        await loadAndRenderTree();
+        
+        showMessage(`Successfully created '${childName}'`, 'success');
+        
+    } catch (error) {
+        console.error('Error creating node:', error);
+        showMessage(`Failed to create node: ${error.message}`, 'error');
+        
+        // Try to reload the tree to get back to a known state
+        try {
+            await loadAndRenderTree();
+        } catch (e) {
+            console.error('Failed to reload tree after error:', e);
+        }
+    }
+
+});
 
     document.getElementById('edit-node-form').addEventListener('submit', handleEditSubmit);
     document.getElementById('modal-cancel-child').addEventListener('click', closeChildModal);
