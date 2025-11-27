@@ -565,6 +565,27 @@ async function openOutboundSection(nodeId) {
         outboundSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 }
+async function deleteNode(contentId, name) {
+    closeDeleteConfirmModal();
+    try {
+        await fetchWithRetry(`/node/delete/${encodeURIComponent(contentId)}`, { 
+            method: 'DELETE' 
+        }); 
+        showMessage(`Node '${name}' deleted successfully.`, 'success');
+        
+        // Clear the tree cache to force a fresh load
+        localStorage.removeItem('tree_cache');
+        
+        // Clear local caches
+        renderedNodes.clear();
+        nodeToFocusId = null;
+        
+        // Reload the tree
+        await loadAndRenderTree();
+    } catch (error) {
+        showMessage(`Failed to delete node: ${error.message}`, 'error');
+    }
+}
 function openEditModal(nodeId) { 
     const node = nodeMap[nodeId]; 
     if (!node) return;
