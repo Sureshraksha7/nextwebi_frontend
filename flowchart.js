@@ -1106,8 +1106,8 @@ function escapeHtml(unsafe) {
         .replace(/'/g, "&#039;");
 }
     // --- Icon Logic: All icons are black, no background circles ---
-    let actionIcons = '';
-    const iconStyle = `width="12" height="12" class="text-gray-800" stroke-width="2.5"`;
+let actionIcons = '';
+const iconStyle = `width="12" height="12" class="text-gray-800" stroke-width="2.5"`;
 
     actionIcons += `
         <button class="info-btn" onclick="openInfoModal('${nodeIdStr}')" title="View Description/Stats">
