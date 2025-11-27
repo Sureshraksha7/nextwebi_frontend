@@ -37,7 +37,10 @@ let nodeToFocusId = null;
 // GLOBAL SET: Tracks nodes already rendered to prevent duplication/misplacement
 let renderedNodes = new Set();
 // Show only a single node card (used for search-by-name/ID)
-let singleNodeMode = false; 
+let singleNodeMode = false;
+
+// Cache for node elements
+let nodeElements = new Map();
 
 // Map status values to Tailwind classes for color coding
 const STATUS_CLASSES = {
@@ -323,6 +326,57 @@ function linkifyDescription(text) {
         return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="text-blue-600 underline">${url}</a>`;
     });
 }
+function updateParentContainer(parentId) {
+    if (!parentId) return;
+    
+    const parentNode = nodeMap[parentId];
+    if (!parentNode || !parentNode.children || parentNode.children.length === 0) {
+        // If parent has no children, remove any existing children container
+        const parentElement = document.getElementById(`node-${parentId}`);
+        if (parentElement) {
+            const parentWrapper = parentElement.closest('.node-wrapper');
+            if (parentWrapper) {
+                const existingContainer = parentWrapper.querySelector('.tree-container');
+                if (existingContainer) {
+                    existingContainer.remove();
+                }
+            }
+        }
+        return;
+    }
+    
+    // If we get here, parent has children
+    const parentElement = document.getElementById(`node-${parentId}`);
+    if (!parentElement) return;
+    
+    const parentWrapper = parentElement.closest('.node-wrapper');
+    if (!parentWrapper) return;
+    
+    let container = parentWrapper.querySelector('.tree-container');
+    
+    if (!container) {
+        // Create new container if it doesn't exist
+        container = document.createElement('div');
+        container.className = 'tree-container' + (parentNode.children.length === 1 ? ' single-child-container' : '');
+        
+        // Insert after the parent node
+        parentWrapper.appendChild(container);
+    } else {
+        // Clear existing children
+        container.innerHTML = '';
+    }
+    
+    // Render all children
+    parentNode.children.forEach(childId => {
+        if (nodeMap[childId]) {
+            const childHtml = renderNode(childId, nodeMap, 1); // Level 1 for children
+            container.insertAdjacentHTML('beforeend', childHtml);
+        }
+    });
+    
+    // Update lucide icons for the new elements
+    window.lucide.createIcons();
+}
 // Main Filter Application Logic (Called by input/select change)
 // Main Filter Application Logic (Called by input/select change)
 // Main Filter Application Logic (Called by input/select change)
@@ -566,24 +620,57 @@ async function openOutboundSection(nodeId) {
     }
 }
 async function deleteNode(contentId, name) {
+    if (!confirm(`Are you sure you want to delete "${name}"? This action cannot be undone.`)) {
+        return;
+    }
+    
     closeDeleteConfirmModal();
+    
     try {
+        // 1. Get parent ID before deletion
+        const parentId = parentMap[contentId];
+        
+        // 2. Delete from server
         await fetchWithRetry(`/node/delete/${encodeURIComponent(contentId)}`, { 
             method: 'DELETE' 
-        }); 
-        showMessage(`Node '${name}' deleted successfully.`, 'success');
+        });
         
-        // Clear the tree cache to force a fresh load
-        localStorage.removeItem('tree_cache');
+        // 3. Update local state
+        // Remove from parent's children array
+        if (parentId && nodeMap[parentId] && nodeMap[parentId].children) {
+            nodeMap[parentId].children = nodeMap[parentId].children.filter(id => id !== contentId);
+        }
         
-        // Clear local caches
-        renderedNodes.clear();
-        nodeToFocusId = null;
+        // Remove from DOM
+        const nodeElement = document.getElementById(`node-${contentId}`);
+        if (nodeElement) {
+            const wrapper = nodeElement.closest('.node-wrapper');
+            if (wrapper) {
+                wrapper.remove();
+            }
+        }
         
-        // Reload the tree
-        await loadAndRenderTree();
+        // Clean up data structures
+        delete nodeMap[contentId];
+        delete parentMap[contentId];
+        
+        // 4. Update parent's container to fix connections
+        if (parentId) {
+            updateParentContainer(parentId);
+        }
+        
+        showMessage(`Node "${name}" deleted successfully.`, 'success');
+        
     } catch (error) {
+        console.error('Error deleting node:', error);
         showMessage(`Failed to delete node: ${error.message}`, 'error');
+        
+        // Fallback to full reload if something went wrong
+        try {
+            await loadAndRenderTree();
+        } catch (e) {
+            console.error('Failed to reload tree after error:', e);
+        }
     }
 }
 function openEditModal(nodeId) { 
@@ -1380,9 +1467,41 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('child-name').value = '';
         document.getElementById('child-description').value = '';
         
-        // 4. Set focus to the new node and reload
-        nodeToFocusId = childId;
-        await loadAndRenderTree();
+        // 4. Add the new node to our maps
+        nodeMap[childId] = {
+            contentId: childId,
+            name: childName,
+            description: childDescription,
+            status: 'New',
+            children: []
+        };
+        parentMap[childId] = parentId;
+        
+        // 5. Update the parent's children array
+        if (nodeMap[parentId]) {
+            if (!nodeMap[parentId].children) {
+                nodeMap[parentId].children = [];
+            }
+            nodeMap[parentId].children.push(childId);
+        }
+        
+        // 6. Render just the new node
+        const parentElement = document.getElementById(`node-${parentId}`);
+        if (parentElement) {
+            const parentWrapper = parentElement.closest('.node-wrapper');
+            if (parentWrapper) {
+                const newHtml = renderNode(childId, nodeMap, 0);
+                parentWrapper.insertAdjacentHTML('beforeend', newHtml);
+                window.lucide.createIcons();
+                
+                // Focus on the new node
+                nodeToFocusId = childId;
+                focusNode(childId);
+                
+                // Update the parent's children container
+                updateParentContainer(parentId);
+            }
+        }
         
         showMessage(`Successfully created '${childName}'`, 'success');
         
