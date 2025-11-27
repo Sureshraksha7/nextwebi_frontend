@@ -1054,6 +1054,7 @@ function buildActionIcons(node, nodeIdStr, nodeName) {
     const iconStyle = `width="12" height="12" class="text-gray-800" stroke-width="2.5"`;
     const firstUrl = getFirstUrl(node.description);
     const hasChildren = node.children && node.children.length > 0;
+    let actionIcons = '';
     
     const icons = [
         `<button class="info-btn" onclick="openInfoModal('${nodeIdStr}')" title="View Description/Stats">
