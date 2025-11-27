@@ -680,36 +680,52 @@ async function deleteNode(contentId, name) {
         const parentId = parentMap[contentId];
         const parentNode = parentId ? nodeMap[parentId] : null;
         
-        // Remove from server
+        // 1. First, remove the node from the parent's children in the DOM
+        if (parentId) {
+            const parentElement = document.getElementById(`node-${parentId}`);
+            if (parentElement) {
+                const nodeWrapper = parentElement.closest('.node-wrapper');
+                if (nodeWrapper) {
+                    const childrenContainer = nodeWrapper.querySelector('.tree-container');
+                    if (childrenContainer) {
+                        const nodeToRemove = childrenContainer.querySelector(`#node-${contentId}`)?.closest('.node-wrapper');
+                        if (nodeToRemove) {
+                            nodeToRemove.remove();
+                            
+                            // If this was the last child, remove the children container
+                            if (childrenContainer.children.length === 0) {
+                                childrenContainer.remove();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Delete from server
         await fetchWithRetry(`/node/delete/${encodeURIComponent(contentId)}`, { 
             method: 'DELETE' 
         });
         
-        // Update local state
+        // 3. Update local state
         if (parentNode && parentNode.children) {
             parentNode.children = parentNode.children.filter(id => id !== contentId);
         }
         
-        // Remove the node from DOM
-        const nodeElement = document.getElementById(`node-${contentId}`);
-        if (nodeElement) {
-            const wrapper = nodeElement.closest('.node-wrapper');
-            if (wrapper) {
-                wrapper.remove();
-            }
-        }
-        
-        // Clean up data structures
+        // 4. Clean up data structures
         delete nodeMap[contentId];
         delete parentMap[contentId];
         
-        // Update the parent's container to fix connections
+        // 5. Force update the parent's container to fix connections
         if (parentId) {
             // Small delay to ensure DOM updates are processed
             setTimeout(() => {
                 updateParentContainer(parentId);
                 updateHorizontalLines();
-            }, 0);
+                
+                // Force a reflow to ensure styles are recalculated
+                document.body.offsetHeight;
+            }, 50);
         }
         
         showMessage(`Node "${name}" deleted successfully.`, 'success');
