@@ -949,7 +949,92 @@ async function updateNodeStats(nodeId) {
     // Recalculate horizontal lines after this node’s width may have changed
     setTimeout(updateHorizontalLines, 0);
 }
+// --- New function to update stats for multiple nodes in a single request ---
+async function updateMultipleNodeStats(nodeIds) {
+    if (!nodeIds || nodeIds.length === 0) return;
 
+    try {
+        const response = await fetchWithRetry('/batch_node_stats', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ nodeIds })
+        });
+
+        // Update the cache with all the stats
+        if (response && response.stats) {
+            Object.assign(nodeStats, response.stats);
+
+            // Update the UI for each node
+            nodeIds.forEach(nodeId => {
+                const stats = response.stats[nodeId] || { inboundCount: 0, outboundCount: 0 };
+                updateNodeStatsUI(nodeId, stats.inboundCount, stats.outboundCount);
+            });
+        }
+    } catch (error) {
+        console.error('Error in batch node stats:', error);
+        // Fall back to individual requests if batch fails
+        nodeIds.forEach(nodeId => updateNodeStats(nodeId));
+    }
+}
+
+// --- Modified version of updateNodeStats that updates the UI ---
+function updateNodeStatsUI(nodeId, inboundCount, outboundCount) {
+    const statsDiv = document.getElementById(`stats-${nodeId}`);
+    if (!statsDiv) return;
+
+    statsDiv.innerHTML = `
+        <div class="flex justify-around text-xs font-bold pt-1 border-t border-gray-300 mt-1">
+            <button type="button"
+                    class="text-gray-700 focus:outline-none"
+                    onclick="openInboundDetails('${nodeId}')">
+                IN:
+                <span id="inbound-stat-${nodeId}" class="inbound-stat ml-1">${inboundCount}</span>
+            </button>
+            <button type="button"
+                    class="text-gray-700 focus:outline-none"
+                    onclick="openOutboundDetails('${nodeId}')">
+                OUT:
+                <span id="outbound-stat-${nodeId}" class="outbound-stat ml-1">${outboundCount}</span>
+            </button>
+        </div>
+    `;
+
+    // Apply styling
+    setTimeout(() => applyStatColors(nodeId), 50);
+    setTimeout(updateHorizontalLines, 0);
+}
+
+// --- Update the original updateNodeStats to use the new functions ---
+async function updateNodeStats(nodeId) {
+    const statsDiv = document.getElementById(`stats-${nodeId}`);
+    if (!statsDiv) return;
+    
+    // Set loading state
+    statsDiv.innerHTML = '<span class="text-gray-400 text-[8px] italic">Loading stats...</span>';
+    
+    try {
+        // For single node updates, we'll still use individual endpoints
+        const [inboundData, outboundData] = await Promise.all([
+            fetchWithRetry(`/inbound_stats/${encodeURIComponent(nodeId)}`),
+            fetchWithRetry(`/outbound_stats/${encodeURIComponent(nodeId)}`)
+        ]);
+
+        const inboundCount = inboundData.total_inbound_count || 0;
+        const outboundCount = outboundData.total_outbound_count || 0;
+        
+        // Update cache
+        nodeStats[nodeId] = { inboundCount, outboundCount };
+        
+        // Update UI
+        updateNodeStatsUI(nodeId, inboundCount, outboundCount);
+        
+    } catch (error) {
+        console.error(`Failed to load stats for ${nodeId}:`, error);
+        statsDiv.innerHTML = '<span class="text-red-500 text-[8px]">Stats Error</span>';
+    }
+}
 
 // --- Node Rendering Logic ---
 
@@ -1188,41 +1273,21 @@ function assignFriendlyIds(orderArray = null) {
  * Renders the visualization using current map (no fetch).
  * This is the function called by filter/zoom actions.
  */
-function loadAndRenderVisuals(rootOverrideId = null) {
-    const vizWrapper = document.getElementById('tree-content-wrapper');
-    renderedNodes.clear(); 
-    vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">Rendering tree...</p>';
+async function loadAndRenderVisuals(rootOverrideId = null) {
+    // ... (existing code until the node rendering part) ...
 
-    let rootNodeId = rootOverrideId || stableRootId || Object.keys(nodeMap)[0];
-    if (!rootNodeId || !nodeMap[rootNodeId]) {
-         // Re-fetch map if map is empty but we expect a root (edge case for corruption)
-         if (stableRootId) loadAndRenderTree(); 
-         return;
-    }
+    // After rendering nodes, update their stats in batches
+    const allNodeIds = Object.keys(nodeMap);
+    const BATCH_SIZE = 20; // Process 20 nodes at a time
     
-    const treeHtml = renderNode(rootNodeId, nodeMap,0);
-    vizWrapper.innerHTML = treeHtml; 
-    window.lucide.createIcons();
-    
-    // 1. Apply saved zoom level (retains user's zoom)
-    applyZoom(currentScale); 
-
-    // 2. Apply Focus after rendering
-    if (nodeToFocusId) {
-        focusNode(nodeToFocusId);
-        nodeToFocusId = null; 
+    for (let i = 0; i < allNodeIds.length; i += BATCH_SIZE) {
+        const batch = allNodeIds.slice(i, i + BATCH_SIZE);
+        await updateMultipleNodeStats(batch);
+        // Small delay between batches to avoid overwhelming the server
+        await new Promise(resolve => setTimeout(resolve, 100));
     }
 
-    // 3. Explicitly trigger stat loading for all visible nodes
-    for (const id in nodeMap) {
-        if(document.getElementById(`node-${id}`)) { 
-            updateNodeStats(id);
-        }
-    }
-    
-    // 4. Recalculate horizontal line widths
-    // Use setTimeout to ensure the DOM has settled and sizes are final.
-    setTimeout(updateHorizontalLines, 250); 
+    // ... (rest of the existing code) ...
 }
 
 /**
