@@ -859,56 +859,50 @@ async function handleLinkSelected() {
 
 // NEW FUNCTION: Applies colors to the IN/OUT counts based on value (0 or >0)
 function applyStatColors(nodeId) {
-    const inboundSpan = document.getElementById(`inbound-stat-${nodeId}`);
-    const outboundSpan = document.getElementById(`outbound-stat-${nodeId}`);
+    const stats = nodeStats[nodeId] || { inboundCount: 0, outboundCount: 0 };
     
-    if (inboundSpan) {
-        if (parseInt(inboundSpan.textContent) > 0) {
-            inboundSpan.classList.add('inbound-active');
-        } else {
-            inboundSpan.classList.add('inbound-inactive');
-        }
+    // Get the stat elements
+    const inboundEl = document.getElementById(`inbound-stat-${nodeId}`);
+    const outboundEl = document.getElementById(`outbound-stat-${nodeId}`);
+    
+    // Apply colors based on count
+    if (inboundEl) {
+        inboundEl.className = 'inbound-stat ml-1 ' + 
+            (stats.inboundCount > 0 ? 'text-green-600 font-bold' : 'text-gray-500');
     }
     
-    if (outboundSpan) {
-        if (parseInt(outboundSpan.textContent) > 0) {
-            outboundSpan.classList.add('outbound-active');
-        } else {
-            outboundSpan.classList.add('outbound-inactive');
-        }
+    if (outboundEl) {
+        outboundEl.className = 'outbound-stat ml-1 ' + 
+            (stats.outboundCount > 0 ? 'text-red-600 font-bold' : 'text-gray-500');
     }
 }
 
-
-// --- Fetch and Update Click Stats for a single node using cached data ---
 function updateNodeStats(nodeId) {
-    // Get stats from cache or use default values
-    const stats = nodeStats[nodeId] || { 
-        inboundCount: 0, 
-        outboundCount: 0 
-    };
-    
-    // Update the UI with the cached stats
+    const stats = nodeStats[nodeId] || { inboundCount: 0, outboundCount: 0 };
+    const hasInbound = stats.inboundCount > 0;
+    const hasOutbound = stats.outboundCount > 0;
     const statsDiv = document.getElementById(`stats-${nodeId}`);
+    
     if (statsDiv) {
         statsDiv.innerHTML = `
             <div class="flex justify-around text-xs font-bold pt-1 border-t border-gray-300 mt-1">
-                <button type="button"
-                        class="text-gray-700 focus:outline-none"
-                        onclick="openInboundDetails('${nodeId}')">
+                <button type="button" class="text-gray-700 focus:outline-none" onclick="openInboundDetails('${nodeId}')">
                     IN:
-                    <span id="inbound-stat-${nodeId}" class="inbound-stat ml-1">${stats.inboundCount}</span>
+                    <span id="inbound-stat-${nodeId}" class="inbound-stat ${hasInbound ? 'inbound-active' : 'inbound-inactive'}">
+                        ${stats.inboundCount}
+                    </span>
                 </button>
-                <button type="button"
-                        class="text-gray-700 focus:outline-none"
-                        onclick="openOutboundDetails('${nodeId}')">
+                <button type="button" class="text-gray-700 focus:outline-none" onclick="openOutboundDetails('${nodeId}')">
                     OUT:
-                    <span id="outbound-stat-${nodeId}" class="outbound-stat ml-1">${stats.outboundCount}</span>
+                    <span id="outbound-stat-${nodeId}" class="outbound-stat ${hasOutbound ? 'outbound-active' : 'outbound-inactive'}">
+                        ${stats.outboundCount}
+                    </span>
                 </button>
             </div>
         `;
     }
 }
+
 function updateVisibleNodeStats() {
     console.log('Updating visible node stats...');
     // Only update stats for nodes that are currently in the DOM
@@ -968,26 +962,15 @@ async function loadAndRenderVisuals(rootOverrideId = null) {
  * Renders a single node card and its children recursively.
  */
 // --- Node Rendering Logic ---
-
 function renderNode(nodeId, nodeMap, level = 0) {
     const node = nodeMap[nodeId];
+    if (!node) return '';
 
-    if (!node) {
-        return '';
-    }
+    // Check if node should be visible
+    if (!isNodeVisible(nodeId)) return '';
 
-    // --- CRITICAL FILTER CHECK ---
-    if (!isNodeVisible(nodeId)) {
-        return '';
-    }
-
-    const isAlreadyRendered = renderedNodes.has(nodeId);
-
-    // Stop recursion if already drawn (prevents cross-linked nodes from shifting position)
-    if (isAlreadyRendered) {
-        return '';
-    }
-
+    // Prevent duplicate rendering
+    if (renderedNodes.has(nodeId)) return '';
     renderedNodes.add(nodeId);
 
     const nodeName = node.name;
@@ -995,34 +978,32 @@ function renderNode(nodeId, nodeMap, level = 0) {
     const friendlyId = node.friendlyId || '';
     const statusClasses = getStatusClasses(node.status);
 
-    // 1. Ensure stable order: Sort children IDs alphabetically for consistent sibling arrangement.
-    const sortedChildren = (node.children || []).sort();
-    const renderableChildrenIds = sortedChildren;
-    const hasChildren = renderableChildrenIds.length > 0;
+    // Get stats from cache or use default values
+    const stats = nodeStats[nodeId] || { inboundCount: 0, outboundCount: 0 };
+    const hasInbound = stats.inboundCount > 0;
+    const hasOutbound = stats.outboundCount > 0;
 
-    // --- Schedule stat update after rendering ---
+    // Handle children
+    const sortedChildren = (node.children || []).sort();
+    const hasChildren = sortedChildren.length > 0;
+
+    // Schedule stat update after rendering
     setTimeout(() => updateNodeStats(nodeId), 100);
 
-    // --- Children rendering ---
+    // Render children
     let childrenHtml = '';
-    if (hasChildren) {
-        // If we are in "single node mode" and this is the root of the render,
-        // do NOT render any children – just the single node card.
-        if (!(singleNodeMode && level === 0)) {
-            const childNodesHtml = renderableChildrenIds
-                .map(childId => renderNode(childId, nodeMap, level + 1))
-                .join('');
+    if (hasChildren && !(singleNodeMode && level === 0)) {
+        const childNodesHtml = sortedChildren
+            .map(childId => renderNode(childId, nodeMap, level + 1))
+            .join('');
 
-            if (childNodesHtml.trim() !== '') {
-                // Add a class if there is only one child wrapper
-                const containerClass =
-                    renderableChildrenIds.length === 1 ? ' single-child-container' : '';
-                childrenHtml = `<div class="tree-container${containerClass}">${childNodesHtml}</div>`;
-            }
+        if (childNodesHtml.trim() !== '') {
+            const containerClass = sortedChildren.length === 1 ? ' single-child-container' : '';
+            childrenHtml = `<div class="tree-container${containerClass}">${childNodesHtml}</div>`;
         }
     }
 
-    // --- Icon Logic: All icons are black, no background circles ---
+    // Action icons
     let actionIcons = '';
     const iconStyle = `width="12" height="12" class="text-gray-800" stroke-width="2.5"`;
 
@@ -1030,21 +1011,15 @@ function renderNode(nodeId, nodeMap, level = 0) {
         <button class="info-btn" onclick="openInfoModal('${nodeIdStr}')" title="View Description/Stats">
             <svg data-lucide="info" ${iconStyle}></svg>
         </button>
-    `;
-
-    actionIcons += `
         <button class="edit-btn" onclick="openEditModal('${nodeIdStr}')" title="Edit Node Details">
             <svg data-lucide="pencil" ${iconStyle}></svg>
         </button>
-    `;
-
-    actionIcons += `
         <button class="search-btn" onclick="openSearchLinkModal('${nodeIdStr}', '${nodeName}')" title="Search & Link Nodes">
             <svg data-lucide="search" ${iconStyle}></svg>
         </button>
     `;
 
-    // Optional external link icon if description has a URL (BLUE)
+    // External link icon if URL exists in description
     const firstUrl = getFirstUrl(node.description);
     if (firstUrl) {
         const safeUrl = firstUrl.replace(/"/g, '&quot;');
@@ -1055,7 +1030,7 @@ function renderNode(nodeId, nodeMap, level = 0) {
         `;
     }
 
-    // Conditional Delete Icon (Only on Leaf Nodes)
+    // Delete icon for leaf nodes
     if ((node.children || []).length === 0) {
         actionIcons += `
             <button class="delete-btn" onclick="openDeleteConfirmModal('${nodeIdStr}')" title="Delete Node">
@@ -1064,14 +1039,33 @@ function renderNode(nodeId, nodeMap, level = 0) {
         `;
     }
 
-    // Add Child Icon
+    // Add child icon
     actionIcons += `
         <button class="add-child-btn" onclick="openChildModal('${nodeIdStr}', '${nodeName}')" title="Add New Child">
             <svg data-lucide="plus" ${iconStyle}></svg>
         </button>
     `;
 
-    // --- Node HTML structure: wrapper carries level-based line color ---
+    // Stats HTML with proper CSS classes
+    const statsHtml = `
+        <div id="stats-${nodeIdStr}" class="p-0.5">
+            <div class="flex justify-around text-xs font-bold pt-1 border-t border-gray-300 mt-1">
+                <button type="button" class="text-gray-700 focus:outline-none" onclick="openInboundDetails('${nodeIdStr}')">
+                    IN:
+                    <span id="inbound-stat-${nodeIdStr}" class="inbound-stat ${hasInbound ? 'inbound-active' : 'inbound-inactive'}">
+                        ${stats.inboundCount}
+                    </span>
+                </button>
+                <button type="button" class="text-gray-700 focus:outline-none" onclick="openOutboundDetails('${nodeIdStr}')">
+                    OUT:
+                    <span id="outbound-stat-${nodeIdStr}" class="outbound-stat ${hasOutbound ? 'outbound-active' : 'outbound-inactive'}">
+                        ${stats.outboundCount}
+                    </span>
+                </button>
+            </div>
+        </div>
+    `;
+
     const wrapperClass = hasChildren ? 'node-wrapper has-children' : 'node-wrapper';
     const levelColor = getLevelColor(level);
 
@@ -1091,10 +1085,7 @@ function renderNode(nodeId, nodeMap, level = 0) {
                 <p class="text-[7px] text-gray-600 pl-4 pr-4">
                     ID: <span class="font-mono">${nodeIdStr.substring(0, 8)}...</span>
                 </p>
-                
-                <div id="stats-${nodeIdStr}" class="p-0.5">
-                    <span class="text-gray-400 text-[8px] italic">Loading stats...</span>
-                </div>
+                ${statsHtml}
             </div>
             ${childrenHtml}
         </div>
@@ -1284,7 +1275,6 @@ function getLevelColor(level) {
     const saturation = 55;
     const lightness = 70;
     return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
-}
 function updateVisibleNodeStats() {
     // Only update stats for nodes that are currently in the DOM
     document.querySelectorAll('[id^="node-"]').forEach(nodeElement => {
