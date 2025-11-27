@@ -680,28 +680,9 @@ async function deleteNode(contentId, name) {
         const parentId = parentMap[contentId];
         const parentNode = parentId ? nodeMap[parentId] : null;
         
-        // 1. First, remove the node from the parent's children in the DOM
-        if (parentId) {
-            const parentElement = document.getElementById(`node-${parentId}`);
-            if (parentElement) {
-                const nodeWrapper = parentElement.closest('.node-wrapper');
-                if (nodeWrapper) {
-                    const childrenContainer = nodeWrapper.querySelector('.tree-container');
-                    if (childrenContainer) {
-                        const nodeToRemove = childrenContainer.querySelector(`#node-${contentId}`)?.closest('.node-wrapper');
-                        if (nodeToRemove) {
-                            nodeToRemove.remove();
-                            
-                            // If this was the last child, remove the children container
-                            if (childrenContainer.children.length === 0) {
-                                childrenContainer.remove();
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
+        // 1. First, store the grandparent ID if it exists
+        const grandParentId = parentId ? parentMap[parentId] : null;
+        
         // 2. Delete from server
         await fetchWithRetry(`/node/delete/${encodeURIComponent(contentId)}`, { 
             method: 'DELETE' 
@@ -718,14 +699,41 @@ async function deleteNode(contentId, name) {
         
         // 5. Force update the parent's container to fix connections
         if (parentId) {
-            // Small delay to ensure DOM updates are processed
-            setTimeout(() => {
-                updateParentContainer(parentId);
-                updateHorizontalLines();
-                
-                // Force a reflow to ensure styles are recalculated
-                document.body.offsetHeight;
-            }, 50);
+            // Remove the node from DOM
+            const nodeToRemove = document.getElementById(`node-${contentId}`)?.closest('.node-wrapper');
+            if (nodeToRemove) {
+                nodeToRemove.remove();
+            }
+            
+            // If parent has no more children, remove its children container
+            if (parentNode && (!parentNode.children || parentNode.children.length === 0)) {
+                const parentElement = document.getElementById(`node-${parentId}`);
+                if (parentElement) {
+                    const childrenContainer = parentElement.closest('.node-wrapper')?.querySelector('.tree-container');
+                    if (childrenContainer) {
+                        childrenContainer.remove();
+                    }
+                }
+            }
+            
+            // Force a complete re-render of the parent's container
+            if (grandParentId) {
+                // Small delay to ensure DOM is ready
+                setTimeout(() => {
+                    updateParentContainer(grandParentId);
+                    updateHorizontalLines();
+                    
+                    // Force a reflow
+                    document.body.offsetHeight;
+                }, 50);
+            } else {
+                // If no grandparent, just update the parent
+                setTimeout(() => {
+                    updateParentContainer(parentId);
+                    updateHorizontalLines();
+                    document.body.offsetHeight;
+                }, 50);
+            }
         }
         
         showMessage(`Node "${name}" deleted successfully.`, 'success');
