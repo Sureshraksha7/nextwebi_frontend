@@ -674,96 +674,40 @@ async function deleteNode(contentId, name) {
     if (!confirm(`Are you sure you want to delete "${name}"? This action cannot be undone.`)) {
         return;
     }
-    
+
     closeDeleteConfirmModal();
-    
+
     try {
         const parentId = parentMap[contentId];
-        const parentNode = parentId ? nodeMap[parentId] : null;
-        
-        // 1. First, remove all connecting lines to/from this node
-        document.querySelectorAll('.connector-line, .tree-line').forEach(line => {
-            if (line.getAttribute('data-from') === contentId || 
-                line.getAttribute('data-to') === contentId ||
-                line.getAttribute('data-node') === contentId) {
-                line.remove();
-            }
-        });
-        
-        // 2. Remove the node from the DOM
+
+        // Optional: quickly remove the card from DOM so UI feels instant
         const nodeElement = document.getElementById(`node-${contentId}`);
         if (nodeElement) {
             const wrapper = nodeElement.closest('.node-wrapper');
-            if (wrapper) {
-                // Remove any child containers first
-                const childContainers = wrapper.querySelectorAll('.tree-container');
-                childContainers.forEach(container => container.remove());
-                wrapper.remove();
-            }
+            if (wrapper) wrapper.remove();
         }
 
-        // 3. Delete from server
-        await fetchWithRetry(`/node/delete/${encodeURIComponent(contentId)}`, { 
-            method: 'DELETE' 
+        // Delete from server
+        await fetchWithRetry(`/node/delete/${encodeURIComponent(contentId)}`, {
+            method: 'DELETE'
         });
-        
-        // 4. Update local state
+
+        // Update local state
+        const parentNode = parentId ? nodeMap[parentId] : null;
         if (parentNode && parentNode.children) {
             parentNode.children = parentNode.children.filter(id => id !== contentId);
         }
-        
-        // 5. Clean up data structures
         delete nodeMap[contentId];
         delete parentMap[contentId];
-        
-        // 6. Force a complete re-render of the parent's children to ensure clean state
-        if (parentId && parentNode) {
-            const parentElement = document.getElementById(`node-${parentId}`);
-            if (parentElement) {
-                const parentWrapper = parentElement.closest('.node-wrapper');
-                if (parentWrapper) {
-                    const existingContainer = parentWrapper.querySelector('.tree-container');
-                    if (existingContainer) {
-                        existingContainer.remove();
-                    }
-                    
-                    if (parentNode.children && parentNode.children.length > 0) {
-                        const newContainer = document.createElement('div');
-                        newContainer.className = 'tree-container';
-                        parentWrapper.appendChild(newContainer);
-                        
-                        parentNode.children.forEach(childId => {
-                            if (nodeMap[childId]) {
-                                const childHtml = renderNode(childId, nodeMap, 1);
-                                newContainer.insertAdjacentHTML('beforeend', childHtml);
-                            }
-                        });
-                        
-                        window.lucide.createIcons();
-                    }
-                }
-            }
-        }
-        
-        // 7. Force update all lines after a small delay
-        setTimeout(() => {
-            // Remove all existing lines
-            document.querySelectorAll('.connector-line, .tree-line').forEach(el => el.remove());
-            
-            // Rebuild all connections
-            updateHorizontalLines();
-            
-            // If we're left with no nodes, refresh the whole view
-            if (Object.keys(nodeMap).length === 0) {
-                loadAndRenderVisuals();
-            }
-        }, 50);
-        
+
+        // **Key change: full re-render**
+        await loadAndRenderTree();     // or loadAndRenderVisuals() if you prefer
+
         showMessage(`Node "${name}" deleted successfully.`, 'success');
-        
     } catch (error) {
         console.error('Error deleting node:', error);
         showMessage(`Failed to delete node: ${error.message}`, 'error');
+        // As last resort:
         location.reload();
     }
 }
