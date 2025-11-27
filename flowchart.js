@@ -37,10 +37,7 @@ let nodeToFocusId = null;
 // GLOBAL SET: Tracks nodes already rendered to prevent duplication/misplacement
 let renderedNodes = new Set();
 // Show only a single node card (used for search-by-name/ID)
-let singleNodeMode = false;
-
-// Cache for node elements
-let nodeElements = new Map();
+let singleNodeMode = false; 
 
 // Map status values to Tailwind classes for color coding
 const STATUS_CLASSES = {
@@ -287,7 +284,6 @@ function toggleFilterPanel() {
 function isNodeVisible(nodeId) {
     const node = nodeMap[nodeId];
     if (!node) return false;
-    if (node._forceVisible) return true;
 
     // 1. Connection filter
     const connectionFilter = document.getElementById('connection-filter-select').value;
@@ -326,57 +322,6 @@ function linkifyDescription(text) {
         const safeUrl = url.replace(/"/g, "&quot;"); // basic escaping
         return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="text-blue-600 underline">${url}</a>`;
     });
-}
-function updateParentContainer(parentId) {
-    if (!parentId) return;
-    
-    const parentNode = nodeMap[parentId];
-    if (!parentNode || !parentNode.children || parentNode.children.length === 0) {
-        // If parent has no children, remove any existing children container
-        const parentElement = document.getElementById(`node-${parentId}`);
-        if (parentElement) {
-            const parentWrapper = parentElement.closest('.node-wrapper');
-            if (parentWrapper) {
-                const existingContainer = parentWrapper.querySelector('.tree-container');
-                if (existingContainer) {
-                    existingContainer.remove();
-                }
-            }
-        }
-        return;
-    }
-    
-    // If we get here, parent has children
-    const parentElement = document.getElementById(`node-${parentId}`);
-    if (!parentElement) return;
-    
-    const parentWrapper = parentElement.closest('.node-wrapper');
-    if (!parentWrapper) return;
-    
-    let container = parentWrapper.querySelector('.tree-container');
-    
-    if (!container) {
-        // Create new container if it doesn't exist
-        container = document.createElement('div');
-        container.className = 'tree-container' + (parentNode.children.length === 1 ? ' single-child-container' : '');
-        
-        // Insert after the parent node
-        parentWrapper.appendChild(container);
-    } else {
-        // Clear existing children
-        container.innerHTML = '';
-    }
-    
-    // Render all children
-    parentNode.children.forEach(childId => {
-        if (nodeMap[childId]) {
-            const childHtml = renderNode(childId, nodeMap, 1); // Level 1 for children
-            container.insertAdjacentHTML('beforeend', childHtml);
-        }
-    });
-    
-    // Update lucide icons for the new elements
-    window.lucide.createIcons();
 }
 // Main Filter Application Logic (Called by input/select change)
 // Main Filter Application Logic (Called by input/select change)
@@ -454,40 +399,44 @@ async function applyFilters() {
     loadAndRenderVisuals(rootId);
 }
 // NEW: Function to cache all node stats needed for connection filtering
-
 async function fetchAllStats() {
+    // If we already have all stats, don't fetch again
+    if (Object.keys(nodeStats).length > 0) {
+        return;
+    }
+
     try {
-        console.log('Fetching all stats...');
-        // Remove the .json() call since fetchWithRetry already parses the JSON
-        const allStats = await fetchWithRetry('/stats/all');
-        
-        // Clear existing stats
-        nodeStats = {};
-        
-        // Debug log to see what we received
-        console.log('Received stats from server:', allStats);
-        
-        // Update the nodeStats cache
-        if (allStats && typeof allStats === 'object') {
-            Object.entries(allStats).forEach(([nodeId, stats]) => {
-                nodeStats[nodeId] = {
-                    inboundCount: stats.total_inbound_count || 0,
-                    outboundCount: stats.total_outbound_count || 0
-                };
-            });
-        } else {
-            console.warn('Unexpected stats format:', allStats);
-        }
-        
-        console.log('Updated nodeStats:', nodeStats);
-        return nodeStats;
+        // Use the new /stats/all endpoint
+        const response = await fetchWithRetry('/stats/all');
+        const allStats = await response.json();
+
+        // Update nodeStats with the new data
+        Object.entries(allStats).forEach(([nodeId, stats]) => {
+            nodeStats[nodeId] = {
+                inboundCount: stats.total_inbound_count || 0,
+                outboundCount: stats.total_outbound_count || 0
+            };
+        });
     } catch (e) {
-        console.error('Error in fetchAllStats:', e);
-        // Initialize with empty stats on error
-        nodeStats = {};
-        return nodeStats;
+        console.warn('Failed to fetch all stats:', e);
+        // Initialize with zeros if the request fails
+        Object.keys(nodeMap).forEach(id => {
+            nodeStats[id] = { inboundCount: 0, outboundCount: 0 };
+        });
     }
 }
+// --- Node Control Functions ---
+async function deleteNode(contentId, name) {
+    closeDeleteConfirmModal();
+    try {
+        await fetchWithRetry(`/node/delete/${encodeURIComponent(contentId)}`, { method: 'DELETE' }); 
+        showMessage(`Node '${name}' deleted successfully.`, 'success');
+        loadAndRenderTree(); // Must perform full reload after delete
+    } catch (error) {
+        showMessage(`Failed to delete node: ${error.message}`, 'error');
+    }
+}
+
 async function handleEditSubmit(e) {
     e.preventDefault();
     const contentId = document.getElementById('edit-content-id').value;
@@ -620,7 +569,6 @@ async function openOutboundSection(nodeId) {
         outboundSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 }
-
 function openEditModal(nodeId) { 
     const node = nodeMap[nodeId]; 
     if (!node) return;
@@ -670,41 +618,6 @@ function openSearchLinkModal(parentId, parentName) {
     document.getElementById('confirm-link-button').disabled = true;
     document.getElementById('search-link-modal').style.display = 'flex';
 }
-async function deleteNode(contentId, name) {
-    if (!confirm(`Are you sure you want to delete "${name}"? This action cannot be undone.`)) {
-        return;
-    }
-
-    closeDeleteConfirmModal();
-
-    try {
-        const parentId = parentMap[contentId];
-
-        // 1) Delete from server – this is the source of truth
-        await fetchWithRetry(`/node/delete/${encodeURIComponent(contentId)}`, {
-            method: 'DELETE'
-        });
-
-        // 2) Update local maps (optional for consistency, tree reload will reset anyway)
-        const parentNode = parentId ? nodeMap[parentId] : null;
-        if (parentNode && Array.isArray(parentNode.children)) {
-            parentNode.children = parentNode.children.filter(id => id !== contentId);
-        }
-        delete nodeMap[contentId];
-        delete parentMap[contentId];
-
-        // 3) FULL reload of the tree (nodes + lines)
-        await loadAndRenderTree();
-
-        showMessage(`Node "${name}" deleted successfully.`, 'success');
-    } catch (error) {
-        console.error('Error deleting node:', error);
-        showMessage(`Failed to delete node: ${error.message}`, 'error');
-        // Last‑resort safety
-        location.reload();
-    }
-}
-
 async function openInboundDetails(nodeId) {
     const node = nodeMap[nodeId];
     if (!node) return;
@@ -950,119 +863,120 @@ async function handleLinkSelected() {
 
 // NEW FUNCTION: Applies colors to the IN/OUT counts based on value (0 or >0)
 function applyStatColors(nodeId) {
-    const stats = nodeStats[nodeId] || { inboundCount: 0, outboundCount: 0 };
+    const inboundSpan = document.getElementById(`inbound-stat-${nodeId}`);
+    const outboundSpan = document.getElementById(`outbound-stat-${nodeId}`);
     
-    // Get the stat elements
-    const inboundEl = document.getElementById(`inbound-stat-${nodeId}`);
-    const outboundEl = document.getElementById(`outbound-stat-${nodeId}`);
-    
-    // Apply colors based on count
-    if (inboundEl) {
-        inboundEl.className = 'inbound-stat ml-1 ' + 
-            (stats.inboundCount > 0 ? 'text-green-600 font-bold' : 'text-gray-500');
+    if (inboundSpan) {
+        if (parseInt(inboundSpan.textContent) > 0) {
+            inboundSpan.classList.add('inbound-active');
+        } else {
+            inboundSpan.classList.add('inbound-inactive');
+        }
     }
     
-    if (outboundEl) {
-        outboundEl.className = 'outbound-stat ml-1 ' + 
-            (stats.outboundCount > 0 ? 'text-red-600 font-bold' : 'text-gray-500');
+    if (outboundSpan) {
+        if (parseInt(outboundSpan.textContent) > 0) {
+            outboundSpan.classList.add('outbound-active');
+        } else {
+            outboundSpan.classList.add('outbound-inactive');
+        }
     }
 }
 
-function updateNodeStats(nodeId) {
-    const stats = nodeStats[nodeId] || { inboundCount: 0, outboundCount: 0 };
-    const hasInbound = stats.inboundCount > 0;
-    const hasOutbound = stats.outboundCount > 0;
+
+// --- NEW FUNCTION: Fetch and Update Click Stats for a single node with retries ---
+async function updateNodeStats(nodeId) {
     const statsDiv = document.getElementById(`stats-${nodeId}`);
+    if (!statsDiv) return;
     
-    if (statsDiv) {
+    // Set loading state immediately
+    statsDiv.innerHTML = '<span class="text-gray-400 text-[8px] italic">Loading stats...</span>';
+    
+    let inboundCount = 0;
+    let outboundCount = 0;
+    const MAX_STAT_RETRIES = 3; 
+
+    // --- Fetch Stats with Retries ---
+    for (let i = 0; i < MAX_STAT_RETRIES; i++) {
+        try {
+            // Attempt to fetch both inbound and outbound data
+            const inboundData = await fetchWithRetry(`/inbound_stats/${encodeURIComponent(nodeId)}`);
+            const outboundData = await fetchWithRetry(`/outbound_stats/${encodeURIComponent(nodeId)}`);
+
+            inboundCount = inboundData.total_inbound_count;
+            outboundCount = outboundData.total_outbound_count;
+            
+            // Cache stats for filtering logic
+            nodeStats[nodeId] = { inboundCount, outboundCount }; 
+            
+            // If data is successfully fetched, break the loop
+            break; 
+
+        } catch (error) {
+            // If it's the last attempt and it failed, log the error
+            if (i === MAX_STAT_RETRIES - 1) {
+                console.error(`Failed to load stats for ${nodeId} after ${MAX_STAT_RETRIES} attempts.`, error);
+                statsDiv.innerHTML = '<span class="text-red-500 text-[8px]">Stats Error</span>';
+                return;
+            }
+            // Wait briefly before retrying
+            await new Promise(resolve => setTimeout(resolve, 500)); 
+        }
+    }
+    
+    // --- Final Display ---
+    // MODIFIED: Use new class structure for styling.
         statsDiv.innerHTML = `
             <div class="flex justify-around text-xs font-bold pt-1 border-t border-gray-300 mt-1">
-                <button type="button" class="text-gray-700 focus:outline-none" onclick="openInboundDetails('${nodeId}')">
+                <button type="button"
+                        class="text-gray-700 focus:outline-none"
+                        onclick="openInboundDetails('${nodeId}')">
                     IN:
-                    <span id="inbound-stat-${nodeId}" class="inbound-stat ${hasInbound ? 'inbound-active' : 'inbound-inactive'}">
-                        ${stats.inboundCount}
-                    </span>
+                    <span id="inbound-stat-${nodeId}" class="inbound-stat ml-1">${inboundCount}</span>
                 </button>
-                <button type="button" class="text-gray-700 focus:outline-none" onclick="openOutboundDetails('${nodeId}')">
+                <button type="button"
+                        class="text-gray-700 focus:outline-none"
+                        onclick="openOutboundDetails('${nodeId}')">
                     OUT:
-                    <span id="outbound-stat-${nodeId}" class="outbound-stat ${hasOutbound ? 'outbound-active' : 'outbound-inactive'}">
-                        ${stats.outboundCount}
-                    </span>
+                    <span id="outbound-stat-${nodeId}" class="outbound-stat ml-1">${outboundCount}</span>
                 </button>
             </div>
         `;
-    }
+
+    // --- Schedule CSS coloring after DOM update ---
+    setTimeout(() => applyStatColors(nodeId), 50);
+
+    // Recalculate horizontal lines after this node’s width may have changed
+    setTimeout(updateHorizontalLines, 0);
 }
 
-function updateVisibleNodeStats() {
-    console.log('Updating visible node stats...');
-    // Only update stats for nodes that are currently in the DOM
-    document.querySelectorAll('[id^="node-"]').forEach(nodeElement => {
-        const nodeId = nodeElement.id.replace('node-', '');
-        console.log('Updating stats for node:', nodeId);
-        updateNodeStats(nodeId);
-    });
-}
-// Update the loadAndRenderVisuals function
-async function loadAndRenderVisuals(rootOverrideId = null) {
-    const vizWrapper = document.getElementById('tree-content-wrapper');
-    if (!vizWrapper) return;
-    
-    renderedNodes.clear(); 
-    vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">Rendering tree...</p>';
 
-    const rootNodeId = rootOverrideId || stableRootId || Object.keys(nodeMap)[0];
-    if (!rootNodeId || !nodeMap[rootNodeId]) {
-        if (stableRootId) {
-            await loadAndRenderTree();
-        }
-        return;
-    }
-    
-    try {
-        // 1. First load all stats
-        await fetchAllStats();
-        
-        // 2. Then render the tree
-        const treeHtml = renderNode(rootNodeId, nodeMap, 0);
-        vizWrapper.innerHTML = treeHtml;
-        window.lucide.createIcons();
-        
-        // 3. Apply saved zoom level
-        applyZoom(currentScale);
-
-        // 4. Update stats for all visible nodes
-        updateVisibleNodeStats();
-        
-        // 5. Focus if needed
-        if (nodeToFocusId) {
-            focusNode(nodeToFocusId);
-            nodeToFocusId = null;
-        }
-        
-        // 6. Update horizontal lines after a short delay
-        setTimeout(updateHorizontalLines, 50);
-    } catch (error) {
-        console.error("Error in loadAndRenderVisuals:", error);
-        vizWrapper.innerHTML = '<p class="text-center text-red-500 italic p-10">Error rendering tree. Please try refreshing the page.</p>';
-    }
-}
 // --- Node Rendering Logic ---
 
 /**
  * Renders a single node card and its children recursively.
  */
 // --- Node Rendering Logic ---
+
 function renderNode(nodeId, nodeMap, level = 0) {
     const node = nodeMap[nodeId];
-    if (!node) return '';
-    if (!node._forceVisible && !isNodeVisible(nodeId)) return '';
 
-    // Check if node should be visible
-    if (!isNodeVisible(nodeId)) return '';
+    if (!node) {
+        return '';
+    }
 
-    // Prevent duplicate rendering
-    if (renderedNodes.has(nodeId)) return '';
+    // --- CRITICAL FILTER CHECK ---
+    if (!isNodeVisible(nodeId)) {
+        return '';
+    }
+
+    const isAlreadyRendered = renderedNodes.has(nodeId);
+
+    // Stop recursion if already drawn (prevents cross-linked nodes from shifting position)
+    if (isAlreadyRendered) {
+        return '';
+    }
+
     renderedNodes.add(nodeId);
 
     const nodeName = node.name;
@@ -1070,32 +984,34 @@ function renderNode(nodeId, nodeMap, level = 0) {
     const friendlyId = node.friendlyId || '';
     const statusClasses = getStatusClasses(node.status);
 
-    // Get stats from cache or use default values
-    const stats = nodeStats[nodeId] || { inboundCount: 0, outboundCount: 0 };
-    const hasInbound = stats.inboundCount > 0;
-    const hasOutbound = stats.outboundCount > 0;
-
-    // Handle children
+    // 1. Ensure stable order: Sort children IDs alphabetically for consistent sibling arrangement.
     const sortedChildren = (node.children || []).sort();
-    const hasChildren = sortedChildren.length > 0;
+    const renderableChildrenIds = sortedChildren;
+    const hasChildren = renderableChildrenIds.length > 0;
 
-    // Schedule stat update after rendering
+    // --- Schedule stat update after rendering ---
     setTimeout(() => updateNodeStats(nodeId), 100);
 
-    // Render children
+    // --- Children rendering ---
     let childrenHtml = '';
-    if (hasChildren && !(singleNodeMode && level === 0)) {
-        const childNodesHtml = sortedChildren
-            .map(childId => renderNode(childId, nodeMap, level + 1))
-            .join('');
+    if (hasChildren) {
+        // If we are in "single node mode" and this is the root of the render,
+        // do NOT render any children – just the single node card.
+        if (!(singleNodeMode && level === 0)) {
+            const childNodesHtml = renderableChildrenIds
+                .map(childId => renderNode(childId, nodeMap, level + 1))
+                .join('');
 
-        if (childNodesHtml.trim() !== '') {
-            const containerClass = sortedChildren.length === 1 ? ' single-child-container' : '';
-            childrenHtml = `<div class="tree-container${containerClass}">${childNodesHtml}</div>`;
+            if (childNodesHtml.trim() !== '') {
+                // Add a class if there is only one child wrapper
+                const containerClass =
+                    renderableChildrenIds.length === 1 ? ' single-child-container' : '';
+                childrenHtml = `<div class="tree-container${containerClass}">${childNodesHtml}</div>`;
+            }
         }
     }
 
-    // Action icons
+    // --- Icon Logic: All icons are black, no background circles ---
     let actionIcons = '';
     const iconStyle = `width="12" height="12" class="text-gray-800" stroke-width="2.5"`;
 
@@ -1103,15 +1019,21 @@ function renderNode(nodeId, nodeMap, level = 0) {
         <button class="info-btn" onclick="openInfoModal('${nodeIdStr}')" title="View Description/Stats">
             <svg data-lucide="info" ${iconStyle}></svg>
         </button>
+    `;
+
+    actionIcons += `
         <button class="edit-btn" onclick="openEditModal('${nodeIdStr}')" title="Edit Node Details">
             <svg data-lucide="pencil" ${iconStyle}></svg>
         </button>
+    `;
+
+    actionIcons += `
         <button class="search-btn" onclick="openSearchLinkModal('${nodeIdStr}', '${nodeName}')" title="Search & Link Nodes">
             <svg data-lucide="search" ${iconStyle}></svg>
         </button>
     `;
 
-    // External link icon if URL exists in description
+    // Optional external link icon if description has a URL (BLUE)
     const firstUrl = getFirstUrl(node.description);
     if (firstUrl) {
         const safeUrl = firstUrl.replace(/"/g, '&quot;');
@@ -1122,7 +1044,7 @@ function renderNode(nodeId, nodeMap, level = 0) {
         `;
     }
 
-    // Delete icon for leaf nodes
+    // Conditional Delete Icon (Only on Leaf Nodes)
     if ((node.children || []).length === 0) {
         actionIcons += `
             <button class="delete-btn" onclick="openDeleteConfirmModal('${nodeIdStr}')" title="Delete Node">
@@ -1131,33 +1053,14 @@ function renderNode(nodeId, nodeMap, level = 0) {
         `;
     }
 
-    // Add child icon
+    // Add Child Icon
     actionIcons += `
         <button class="add-child-btn" onclick="openChildModal('${nodeIdStr}', '${nodeName}')" title="Add New Child">
             <svg data-lucide="plus" ${iconStyle}></svg>
         </button>
     `;
 
-    // Stats HTML with proper CSS classes
-    const statsHtml = `
-        <div id="stats-${nodeIdStr}" class="p-0.5">
-            <div class="flex justify-around text-xs font-bold pt-1 border-t border-gray-300 mt-1">
-                <button type="button" class="text-gray-700 focus:outline-none" onclick="openInboundDetails('${nodeIdStr}')">
-                    IN:
-                    <span id="inbound-stat-${nodeIdStr}" class="inbound-stat ${hasInbound ? 'inbound-active' : 'inbound-inactive'}">
-                        ${stats.inboundCount}
-                    </span>
-                </button>
-                <button type="button" class="text-gray-700 focus:outline-none" onclick="openOutboundDetails('${nodeIdStr}')">
-                    OUT:
-                    <span id="outbound-stat-${nodeIdStr}" class="outbound-stat ${hasOutbound ? 'outbound-active' : 'outbound-inactive'}">
-                        ${stats.outboundCount}
-                    </span>
-                </button>
-            </div>
-        </div>
-    `;
-
+    // --- Node HTML structure: wrapper carries level-based line color ---
     const wrapperClass = hasChildren ? 'node-wrapper has-children' : 'node-wrapper';
     const levelColor = getLevelColor(level);
 
@@ -1177,7 +1080,10 @@ function renderNode(nodeId, nodeMap, level = 0) {
                 <p class="text-[7px] text-gray-600 pl-4 pr-4">
                     ID: <span class="font-mono">${nodeIdStr.substring(0, 8)}...</span>
                 </p>
-                ${statsHtml}
+                
+                <div id="stats-${nodeIdStr}" class="p-0.5">
+                    <span class="text-gray-400 text-[8px] italic">Loading stats...</span>
+                </div>
             </div>
             ${childrenHtml}
         </div>
@@ -1193,18 +1099,11 @@ function renderNode(nodeId, nodeMap, level = 0) {
  */
 async function loadAndRenderTree() {
     const vizWrapper = document.getElementById('tree-content-wrapper');
-    if (!vizWrapper) return; // Safety check
+    vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">Loading tree structure...</p>';
     
-    // Show loading state
-    vizWrapper.innerHTML = '<div class="flex justify-center items-center h-full"><div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div></div>';
+    renderedNodes.clear(); 
     
     try {
-        // Clear previous state
-        renderedNodes.clear();
-        nodeMap = {};
-        parentMap = {};
-
-        // Fetch the tree structure
         const response = await fetchWithRetry('/tree');
         
         if (!response || response.length === 0) {
@@ -1212,62 +1111,54 @@ async function loadAndRenderTree() {
             return;
         }
 
-        // Build node and parent maps
+        // 1. Map all nodes by ID
+        nodeMap = {};
+        parentMap = {};
+        
         response.forEach(node => {
-            nodeMap[node.contentId] = { ...node };
+            nodeMap[node.contentId] = { ...node }; 
         });
 
-        // Build parentMap
+        // Build parentMap: childId -> parentId
         response.forEach(node => {
             if (Array.isArray(node.children)) {
                 node.children.forEach(childId => {
-                    if (childId && nodeMap[childId]) {
+                    if (childId) {
                         parentMap[childId] = node.contentId;
                     }
                 });
             }
         });
 
-        // Assign friendly IDs
+        // Assign friendly short IDs (01, 02, 03, ...)
         assignFriendlyIds(response);
         updateTotalNodeCount();
 
-        // Identify root node
-        const rootNodeId = response[0]?.contentId;
-        if (!rootNodeId) {
-            throw new Error('No root node found');
+        // 2. Identify the Root Node 
+        let rootNodeId = null;
+        
+        if (response.length > 0) {
+            rootNodeId = response[0].contentId; 
+            stableRootId = rootNodeId; 
+        } else {
+            return;
         }
-        stableRootId = rootNodeId;
+        
+        const rootName = nodeMap[rootNodeId].name;
+        
+        // 3. Render visuals (uses loadAndRenderVisuals to handle zoom/focus logic)
+        loadAndRenderVisuals(rootNodeId);
 
-        // Load all stats before rendering
-        await fetchAllStats();
-        
-        // Render the tree
-        const treeHtml = renderNode(rootNodeId, nodeMap, 0);
-        vizWrapper.innerHTML = treeHtml;
-        window.lucide.createIcons();
-        
-        // Apply zoom and focus
-        applyZoom(currentScale);
-        if (nodeToFocusId) {
-            focusNode(nodeToFocusId);
-            nodeToFocusId = null;
+        // 4. Initial Scroll/Reset (Only if no focus node was requested by DML actions)
+        if (!nodeToFocusId) {
+            vizWrapper.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
         }
-        
-        // Update horizontal lines after a short delay
-        setTimeout(updateHorizontalLines, 50);
-        
+
+        showMessage(`Tree loaded successfully, starting from root: ${rootName}.`, 'success');
+
     } catch (error) {
+        vizWrapper.innerHTML = '<p class="text-center text-red-500 italic p-10">Error loading graph. Check backend connection or console for details.</p>';
         console.error("Tree loading failed:", error);
-        vizWrapper.innerHTML = `
-            <div class="text-center p-10">
-                <p class="text-red-500 font-medium">Error loading tree:</p>
-                <p class="text-gray-600 text-sm mt-2">${error.message}</p>
-                <button onclick="loadAndRenderTree()" class="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors">
-                    Retry
-                </button>
-            </div>
-        `;
     }
 }
 function assignFriendlyIds(orderArray = null) {
@@ -1293,59 +1184,44 @@ function assignFriendlyIds(orderArray = null) {
         counter += 1;
     });
 }
+/**
+ * Renders the visualization using current map (no fetch).
+ * This is the function called by filter/zoom actions.
+ */
 function loadAndRenderVisuals(rootOverrideId = null) {
     const vizWrapper = document.getElementById('tree-content-wrapper');
     renderedNodes.clear(); 
-    
-    // First pass: Mark all parent nodes of visible nodes as visible
-    const markParentsVisible = (nodeId) => {
-        let currentId = nodeId;
-        while (parentMap[currentId]) {
-            const parentId = parentMap[currentId];
-            if (!nodeMap[parentId]) break;
-            nodeMap[parentId]._forceVisible = true; // Temporary flag
-            currentId = parentId;
-        }
-    };
-
-    // Mark all visible nodes and their parents
-    for (const nodeId in nodeMap) {
-        if (isNodeVisible(nodeId)) {
-            markParentsVisible(nodeId);
-        }
-    }
-
     vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">Rendering tree...</p>';
 
     let rootNodeId = rootOverrideId || stableRootId || Object.keys(nodeMap)[0];
     if (!rootNodeId || !nodeMap[rootNodeId]) {
-        if (stableRootId) loadAndRenderTree(); 
-        return;
+         // Re-fetch map if map is empty but we expect a root (edge case for corruption)
+         if (stableRootId) loadAndRenderTree(); 
+         return;
     }
     
-    const treeHtml = renderNode(rootNodeId, nodeMap, 0);
+    const treeHtml = renderNode(rootNodeId, nodeMap,0);
     vizWrapper.innerHTML = treeHtml; 
     window.lucide.createIcons();
     
-    // Clean up temporary flags
-    for (const nodeId in nodeMap) {
-        delete nodeMap[nodeId]._forceVisible;
-    }
-
-    // Rest of the function remains the same...
+    // 1. Apply saved zoom level (retains user's zoom)
     applyZoom(currentScale); 
 
+    // 2. Apply Focus after rendering
     if (nodeToFocusId) {
         focusNode(nodeToFocusId);
         nodeToFocusId = null; 
     }
 
+    // 3. Explicitly trigger stat loading for all visible nodes
     for (const id in nodeMap) {
         if(document.getElementById(`node-${id}`)) { 
             updateNodeStats(id);
         }
     }
     
+    // 4. Recalculate horizontal line widths
+    // Use setTimeout to ensure the DOM has settled and sizes are final.
     setTimeout(updateHorizontalLines, 250); 
 }
 
@@ -1402,121 +1278,56 @@ function getLevelColor(level) {
     const lightness = 70;
     return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
 }
-function updateVisibleNodeStats() {
-    // Only update stats for nodes that are currently in the DOM
-    document.querySelectorAll('[id^="node-"]').forEach(nodeElement => {
-        const nodeId = nodeElement.id.replace('node-', '');
-        updateNodeStats(nodeId);
-    });
-}
+
 // Use DOMContentLoaded to ensure elements are available for listeners
 document.addEventListener('DOMContentLoaded', () => {
     
     // Event listener for adding a new child node
     document.getElementById('create-child-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    
-    const parentId = document.getElementById('modal-parent-id').value;
-    const parentName = nodeMap[parentId]?.name || 'Parent';
-    const childName = document.getElementById('child-name').value.trim();
-    const childDescription = document.getElementById('child-description').value.trim();
+        e.preventDefault();
+        const parentId = document.getElementById('modal-parent-id').value;
+        const parentName = nodeMap[parentId].name;
 
-    if (!childName) {
-        showMessage('Please enter a name for the new node', 'error');
-        return;
-    }
+        const childName = document.getElementById('child-name').value.trim();
+        const childDescription = document.getElementById('child-description').value.trim();
 
-    closeChildModal();
-    
-    try {
-        // Show loading state
-        const vizWrapper = document.getElementById('tree-content-wrapper');
-        vizWrapper.innerHTML = '<div class="flex justify-center items-center h-full"><div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div></div>';
-
-        // 1. Create the Child Node
-        showMessage(`Creating node '${childName}'...`, 'info');
-        const nodeOptions = {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                name: childName, 
-                description: childDescription, 
-                status: 'New' 
-            })
-        };
+        closeChildModal(); 
         
-        const childResult = await fetchWithRetry('/node/create', nodeOptions);
-        const childId = childResult.contentId;
-        
-        if (!childId) {
-            throw new Error('Failed to create node: No ID returned');
-        }
-
-        // 2. Create the Relationship
-        showMessage(`Linking '${parentName}' to '${childName}'...`, 'info');
-        const relationOptions = {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ parentId, childId })
-        };
-        
-        await fetchWithRetry('/relation/create', relationOptions);
-        
-        // 3. Clear the form
-        document.getElementById('child-name').value = '';
-        document.getElementById('child-description').value = '';
-        
-        // 4. Add the new node to our maps
-        nodeMap[childId] = {
-            contentId: childId,
-            name: childName,
-            description: childDescription,
-            status: 'New',
-            children: []
-        };
-        parentMap[childId] = parentId;
-        
-        // 5. Update the parent's children array
-        if (nodeMap[parentId]) {
-            if (!nodeMap[parentId].children) {
-                nodeMap[parentId].children = [];
-            }
-            nodeMap[parentId].children.push(childId);
-        }
-        
-        // 6. Render just the new node
-        const parentElement = document.getElementById(`node-${parentId}`);
-        if (parentElement) {
-            const parentWrapper = parentElement.closest('.node-wrapper');
-            if (parentWrapper) {
-                const newHtml = renderNode(childId, nodeMap, 0);
-                parentWrapper.insertAdjacentHTML('beforeend', newHtml);
-                window.lucide.createIcons();
-                
-                // Focus on the new node
-                nodeToFocusId = childId;
-                focusNode(childId);
-                
-                // Update the parent's children container
-                updateParentContainer(parentId);
-            }
-        }
-        
-        showMessage(`Successfully created '${childName}'`, 'success');
-        
-    } catch (error) {
-        console.error('Error creating node:', error);
-        showMessage(`Failed to create node: ${error.message}`, 'error');
-        
-        // Try to reload the tree to get back to a known state
+        let childId = null;
         try {
-            await loadAndRenderTree();
-        } catch (e) {
-            console.error('Failed to reload tree after error:', e);
+            // 1. Create the Child Node
+            showMessage(`1/2: Creating new node '${childName}'...`, 'info');
+            const nodeOptions = {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: childName, description: childDescription, status: 'New' })
+            };
+            const childResult = await fetchWithRetry('/node/create', nodeOptions);
+            childId = childResult.contentId;
+            
+            // 2. Create the Relationship
+            showMessage(`2/2: Linking '${parentName}' to '${childName}'...`, 'info');
+            const relationOptions = {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ parentId: parentId, childId: childId })
+            };
+            await fetchWithRetry('/relation/create', relationOptions);
+            
+            showMessage(`Child '${childName}' added and linked successfully.`, 'success');
+            
+            // --- CRITICAL FIX: Set focus ID and reload to reflect new structure and keep position ---
+            if (childId) {
+                nodeToFocusId = childId; // Set focus to the new node
+            }
+            loadAndRenderTree(); 
+ // Necessary full refresh to update hierarchy
+            
+        } catch (error) {
+            showMessage(`Failed to create or link child node: ${error.message}.`, 'error');
+            loadAndRenderTree(); // Fallback to full refresh on failure
         }
-    }
-
-});
+    });
 
     document.getElementById('edit-node-form').addEventListener('submit', handleEditSubmit);
     document.getElementById('modal-cancel-child').addEventListener('click', closeChildModal);
