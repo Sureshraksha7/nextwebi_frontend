@@ -402,22 +402,33 @@ async function fetchAllStats() {
         const response = await fetchWithRetry('/stats/all');
         const allStats = await response.json();
 
-        // Update nodeStats with the new data
-        Object.entries(allStats).forEach(([nodeId, stats]) => {
-            nodeStats[nodeId] = {
-                inboundCount: stats.total_inbound_count || 0,
-                outboundCount: stats.total_outbound_count || 0
+        // Initialize nodeStats with empty objects for all known nodes
+        nodeStats = {};
+        Object.keys(nodeMap).forEach(id => {
+            nodeStats[id] = { 
+                inboundCount: 0, 
+                outboundCount: 0 
             };
+        });
+
+        // Update with actual stats
+        Object.entries(allStats).forEach(([nodeId, stats]) => {
+            if (nodeMap[nodeId]) {  // Only include nodes that exist in our map
+                nodeStats[nodeId] = {
+                    inboundCount: stats.total_inbound_count || 0,
+                    outboundCount: stats.total_outbound_count || 0
+                };
+            }
         });
     } catch (e) {
         console.warn('Failed to fetch all stats:', e);
         // Initialize with zeros if the request fails
+        nodeStats = {};
         Object.keys(nodeMap).forEach(id => {
             nodeStats[id] = { inboundCount: 0, outboundCount: 0 };
         });
     }
 }
-
 // --- Node Control Functions ---
 async function deleteNode(contentId, name) {
     closeDeleteConfirmModal();
@@ -463,9 +474,8 @@ async function handleEditSubmit(e) {
 
 // Update Node Stats Display
 async function updateNodeStats(nodeId) {
-    // No need to fetch individual stats anymore as we get all at once
+    // Ensure nodeStats is initialized for this node
     if (!nodeStats[nodeId]) {
-        // Initialize with zeros if not in our stats yet
         nodeStats[nodeId] = { inboundCount: 0, outboundCount: 0 };
     }
     
@@ -497,7 +507,6 @@ async function updateNodeStats(nodeId) {
     // Apply color coding
     setTimeout(() => applyStatColors(nodeId), 50);
 }
-
 // --- Node Rendering Logic ---
 function renderNode(nodeId, nodeMap, level = 0) {
     const node = nodeMap[nodeId];
@@ -730,43 +739,56 @@ function assignFriendlyIds(orderArray = null) {
  */
 async function loadAndRenderVisuals(rootOverrideId = null) {
     const vizWrapper = document.getElementById('tree-content-wrapper');
+    if (!vizWrapper) return;
+    
     renderedNodes.clear(); 
     vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">Rendering tree...</p>';
 
     let rootNodeId = rootOverrideId || stableRootId || Object.keys(nodeMap)[0];
     if (!rootNodeId || !nodeMap[rootNodeId]) {
-         // Re-fetch map if map is empty but we expect a root (edge case for corruption)
-         if (stableRootId) loadAndRenderTree(); 
-         return;
-    }
-    
-    // Load all stats before rendering
-    await fetchAllStats();
-    
-    const treeHtml = renderNode(rootNodeId, nodeMap, 0);
-    vizWrapper.innerHTML = treeHtml; 
-    window.lucide.createIcons();
-    
-    // Apply saved zoom level
-    applyZoom(currentScale); 
-
-    // Apply focus after rendering
-    if (nodeToFocusId) {
-        focusNode(nodeToFocusId);
-        nodeToFocusId = null; 
-    }
-
-    // Update stats for all visible nodes
-    for (const id in nodeMap) {
-        if (document.getElementById(`node-${id}`)) { 
-            updateNodeStats(id);
+        if (stableRootId) {
+            await loadAndRenderTree();
         }
+        return;
     }
     
-    // Recalculate horizontal lines
-    setTimeout(updateHorizontalLines, 250); 
-}
+    try {
+        // Make sure we have the node map before fetching stats
+        if (Object.keys(nodeMap).length === 0) {
+            await loadAndRenderTree();
+            return;
+        }
 
+        // Now it's safe to fetch stats
+        await fetchAllStats();
+        
+        const treeHtml = renderNode(rootNodeId, nodeMap, 0);
+        vizWrapper.innerHTML = treeHtml; 
+        window.lucide.createIcons();
+        
+        // Apply saved zoom level
+        applyZoom(currentScale); 
+
+        // Apply focus after rendering
+        if (nodeToFocusId) {
+            focusNode(nodeToFocusId);
+            nodeToFocusId = null; 
+        }
+
+        // Update stats for all visible nodes
+        for (const id in nodeMap) {
+            if (document.getElementById(`node-${id}`)) { 
+                updateNodeStats(id);
+            }
+        }
+        
+        // Recalculate horizontal lines
+        setTimeout(updateHorizontalLines, 250);
+    } catch (error) {
+        console.error("Error in loadAndRenderVisuals:", error);
+        vizWrapper.innerHTML = '<p class="text-center text-red-500 italic p-10">Error rendering tree. Please try refreshing the page.</p>';
+    }
+}
 function updateHorizontalLines() {
     document.querySelectorAll(".tree-container").forEach(container => {
         const children = container.children;
