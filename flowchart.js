@@ -680,34 +680,27 @@ async function deleteNode(contentId, name) {
     try {
         const parentId = parentMap[contentId];
 
-        // Optional: quickly remove the card from DOM so UI feels instant
-        const nodeElement = document.getElementById(`node-${contentId}`);
-        if (nodeElement) {
-            const wrapper = nodeElement.closest('.node-wrapper');
-            if (wrapper) wrapper.remove();
-        }
-
-        // Delete from server
+        // 1) Delete from server – this is the source of truth
         await fetchWithRetry(`/node/delete/${encodeURIComponent(contentId)}`, {
             method: 'DELETE'
         });
 
-        // Update local state
+        // 2) Update local maps (optional for consistency, tree reload will reset anyway)
         const parentNode = parentId ? nodeMap[parentId] : null;
-        if (parentNode && parentNode.children) {
+        if (parentNode && Array.isArray(parentNode.children)) {
             parentNode.children = parentNode.children.filter(id => id !== contentId);
         }
         delete nodeMap[contentId];
         delete parentMap[contentId];
 
-        // **Key change: full re-render**
-        await loadAndRenderTree();     // or loadAndRenderVisuals() if you prefer
+        // 3) FULL reload of the tree (nodes + lines)
+        await loadAndRenderTree();
 
         showMessage(`Node "${name}" deleted successfully.`, 'success');
     } catch (error) {
         console.error('Error deleting node:', error);
         showMessage(`Failed to delete node: ${error.message}`, 'error');
-        // As last resort:
+        // Last‑resort safety
         location.reload();
     }
 }
