@@ -399,29 +399,41 @@ async function applyFilters() {
     loadAndRenderVisuals(rootId);
 }
 // NEW: Function to cache all node stats needed for connection filtering
-async function fetchAllStats() {
-    // If already cached, don't refetch
-    if (Object.keys(nodeStats).length === Object.keys(nodeMap).length && Object.keys(nodeMap).length > 0) {
-        return;
-    }
 
-    try {
-        const allStats = await fetchWithRetry('/stats/all');
-        
-        // Update nodeStats with the new data
-        for (const [nodeId, stats] of Object.entries(allStats)) {
-            nodeStats[nodeId] = {
-                inboundCount: stats.total_inbound_count || 0,
-                outboundCount: stats.total_outbound_count || 0
-            };
+
+// Optimized function to fetch all node stats in a single request
+async function fetchAllStats() {
+    // Only fetch if we don't have any stats yet
+    if (Object.keys(nodeStats).length === 0) {
+        try {
+            const response = await fetchWithRetry('/stats/all');
+            const allStats = await response.json();
+            
+            // Update the nodeStats cache in one go
+            Object.entries(allStats).forEach(([nodeId, stats]) => {
+                if (nodeMap[nodeId]) {
+                    nodeStats[nodeId] = {
+                        inboundCount: stats.total_inbound_count || 0,
+                        outboundCount: stats.total_outbound_count || 0
+                    };
+                }
+            });
+            
+            // Initialize stats for nodes not in the response
+            Object.keys(nodeMap).forEach(id => {
+                if (!nodeStats[id]) {
+                    nodeStats[id] = { inboundCount: 0, outboundCount: 0 };
+                }
+            });
+        } catch (e) {
+            console.warn('Failed to fetch all stats:', e);
+            // Initialize all nodes with 0 stats on error
+            Object.keys(nodeMap).forEach(id => {
+                nodeStats[id] = { inboundCount: 0, outboundCount: 0 };
+            });
         }
-    } catch (e) {
-        console.warn('Failed to fetch all stats:', e);
-        // Fallback: set all to 0 but don't block the UI
-        Object.keys(nodeMap).forEach(id => {
-            nodeStats[id] = { inboundCount: 0, outboundCount: 0 };
-        });
     }
+    return nodeStats;
 }
 // --- Node Control Functions ---
 async function deleteNode(contentId, name) {
@@ -882,73 +894,86 @@ function applyStatColors(nodeId) {
 }
 
 
-// --- NEW FUNCTION: Fetch and Update Click Stats for a single node with retries ---
-async function updateNodeStats(nodeId) {
+// --- Fetch and Update Click Stats for a single node using cached data ---
+function updateNodeStats(nodeId) {
+    // Get stats from cache or use default values
+    const stats = nodeStats[nodeId] || { inboundCount: 0, outboundCount: 0 };
+    
+    // Update the UI with the cached stats
     const statsDiv = document.getElementById(`stats-${nodeId}`);
-    if (!statsDiv) return;
-    
-    // Set loading state immediately
-    statsDiv.innerHTML = '<span class="text-gray-400 text-[8px] italic">Loading stats...</span>';
-    
-    let inboundCount = 0;
-    let outboundCount = 0;
-    const MAX_STAT_RETRIES = 3; 
-
-    // --- Fetch Stats with Retries ---
-    for (let i = 0; i < MAX_STAT_RETRIES; i++) {
-        try {
-            // Attempt to fetch both inbound and outbound data
-            const inboundData = await fetchWithRetry(`/inbound_stats/${encodeURIComponent(nodeId)}`);
-            const outboundData = await fetchWithRetry(`/outbound_stats/${encodeURIComponent(nodeId)}`);
-
-            inboundCount = inboundData.total_inbound_count;
-            outboundCount = outboundData.total_outbound_count;
-            
-            // Cache stats for filtering logic
-            nodeStats[nodeId] = { inboundCount, outboundCount }; 
-            
-            // If data is successfully fetched, break the loop
-            break; 
-
-        } catch (error) {
-            // If it's the last attempt and it failed, log the error
-            if (i === MAX_STAT_RETRIES - 1) {
-                console.error(`Failed to load stats for ${nodeId} after ${MAX_STAT_RETRIES} attempts.`, error);
-                statsDiv.innerHTML = '<span class="text-red-500 text-[8px]">Stats Error</span>';
-                return;
-            }
-            // Wait briefly before retrying
-            await new Promise(resolve => setTimeout(resolve, 500)); 
-        }
-    }
-    
-    // --- Final Display ---
-    // MODIFIED: Use new class structure for styling.
+    if (statsDiv) {
         statsDiv.innerHTML = `
             <div class="flex justify-around text-xs font-bold pt-1 border-t border-gray-300 mt-1">
                 <button type="button"
                         class="text-gray-700 focus:outline-none"
                         onclick="openInboundDetails('${nodeId}')">
                     IN:
-                    <span id="inbound-stat-${nodeId}" class="inbound-stat ml-1">${inboundCount}</span>
+                    <span id="inbound-stat-${nodeId}" class="inbound-stat ml-1">${stats.inboundCount}</span>
                 </button>
                 <button type="button"
                         class="text-gray-700 focus:outline-none"
                         onclick="openOutboundDetails('${nodeId}')">
                     OUT:
-                    <span id="outbound-stat-${nodeId}" class="outbound-stat ml-1">${outboundCount}</span>
+                    <span id="outbound-stat-${nodeId}" class="outbound-stat ml-1">${stats.outboundCount}</span>
                 </button>
             </div>
         `;
-
-    // --- Schedule CSS coloring after DOM update ---
-    setTimeout(() => applyStatColors(nodeId), 50);
-
-    // Recalculate horizontal lines after this node’s width may have changed
-    setTimeout(updateHorizontalLines, 0);
+        
+        // Apply color coding
+        applyStatColors(nodeId);
+    }
 }
+function updateVisibleNodeStats() {
+    // Only update stats for nodes that are currently in the DOM
+    document.querySelectorAll('[id^="node-"]').forEach(nodeElement => {
+        const nodeId = nodeElement.id.replace('node-', '');
+        updateNodeStats(nodeId); // This now handles both stats and UI
+    });
+}
+// Update the loadAndRenderVisuals function
+async function loadAndRenderVisuals(rootOverrideId = null) {
+    const vizWrapper = document.getElementById('tree-content-wrapper');
+    if (!vizWrapper) return;
+    
+    renderedNodes.clear(); 
+    vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">Rendering tree...</p>';
 
+    const rootNodeId = rootOverrideId || stableRootId || Object.keys(nodeMap)[0];
+    if (!rootNodeId || !nodeMap[rootNodeId]) {
+        if (stableRootId) {
+            await loadAndRenderTree();
+        }
+        return;
+    }
+    
+    try {
+        // Load stats before rendering
+        await fetchAllStats();
+        
+        // Initial render with loading state
+        const treeHtml = renderNode(rootNodeId, nodeMap, 0);
+        vizWrapper.innerHTML = treeHtml;
+        window.lucide.createIcons();
+        
+        // Apply saved zoom level
+        applyZoom(currentScale);
 
+        // Update stats for visible nodes
+        updateVisibleNodeStats();
+        
+        // Focus if needed
+        if (nodeToFocusId) {
+            focusNode(nodeToFocusId);
+            nodeToFocusId = null;
+        }
+        
+        // Update horizontal lines after a short delay
+        setTimeout(updateHorizontalLines, 50);
+    } catch (error) {
+        console.error("Error in loadAndRenderVisuals:", error);
+        vizWrapper.innerHTML = '<p class="text-center text-red-500 italic p-10">Error rendering tree. Please try refreshing the page.</p>';
+    }
+}
 // --- Node Rendering Logic ---
 
 /**
@@ -1276,7 +1301,13 @@ function getLevelColor(level) {
     const lightness = 70;
     return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
 }
-
+function updateVisibleNodeStats() {
+    // Only update stats for nodes that are currently in the DOM
+    document.querySelectorAll('[id^="node-"]').forEach(nodeElement => {
+        const nodeId = nodeElement.id.replace('node-', '');
+        updateNodeStats(nodeId);
+    });
+}
 // Use DOMContentLoaded to ensure elements are available for listeners
 document.addEventListener('DOMContentLoaded', () => {
     
