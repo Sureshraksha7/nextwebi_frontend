@@ -680,9 +680,15 @@ async function deleteNode(contentId, name) {
         const parentId = parentMap[contentId];
         const parentNode = parentId ? nodeMap[parentId] : null;
         
-        // 1. First, store the grandparent ID if it exists
-        const grandParentId = parentId ? parentMap[parentId] : null;
-        
+        // 1. First, remove the node from the DOM
+        const nodeElement = document.getElementById(`node-${contentId}`);
+        if (nodeElement) {
+            const wrapper = nodeElement.closest('.node-wrapper');
+            if (wrapper) {
+                wrapper.remove();
+            }
+        }
+
         // 2. Delete from server
         await fetchWithRetry(`/node/delete/${encodeURIComponent(contentId)}`, { 
             method: 'DELETE' 
@@ -697,43 +703,41 @@ async function deleteNode(contentId, name) {
         delete nodeMap[contentId];
         delete parentMap[contentId];
         
-        // 5. Force update the parent's container to fix connections
+        // 5. Update the parent's container to fix connections
         if (parentId) {
-            // Remove the node from DOM
-            const nodeToRemove = document.getElementById(`node-${contentId}`)?.closest('.node-wrapper');
-            if (nodeToRemove) {
-                nodeToRemove.remove();
-            }
-            
-            // If parent has no more children, remove its children container
-            if (parentNode && (!parentNode.children || parentNode.children.length === 0)) {
-                const parentElement = document.getElementById(`node-${parentId}`);
-                if (parentElement) {
-                    const childrenContainer = parentElement.closest('.node-wrapper')?.querySelector('.tree-container');
-                    if (childrenContainer) {
-                        childrenContainer.remove();
+            // Force a complete re-render of the parent's children
+            const parentElement = document.getElementById(`node-${parentId}`);
+            if (parentElement) {
+                const parentWrapper = parentElement.closest('.node-wrapper');
+                if (parentWrapper) {
+                    // Remove existing children container if it exists
+                    const existingContainer = parentWrapper.querySelector('.tree-container');
+                    if (existingContainer) {
+                        existingContainer.remove();
+                    }
+                    
+                    // Only re-render if there are children left
+                    if (parentNode && parentNode.children && parentNode.children.length > 0) {
+                        const newContainer = document.createElement('div');
+                        newContainer.className = 'tree-container';
+                        parentWrapper.appendChild(newContainer);
+                        
+                        // Re-render all children
+                        parentNode.children.forEach(childId => {
+                            if (nodeMap[childId]) {
+                                const childHtml = renderNode(childId, nodeMap, 1); // Level 1 for children
+                                newContainer.insertAdjacentHTML('beforeend', childHtml);
+                            }
+                        });
+                        
+                        // Update lucide icons for the new elements
+                        window.lucide.createIcons();
                     }
                 }
             }
             
-            // Force a complete re-render of the parent's container
-            if (grandParentId) {
-                // Small delay to ensure DOM is ready
-                setTimeout(() => {
-                    updateParentContainer(grandParentId);
-                    updateHorizontalLines();
-                    
-                    // Force a reflow
-                    document.body.offsetHeight;
-                }, 50);
-            } else {
-                // If no grandparent, just update the parent
-                setTimeout(() => {
-                    updateParentContainer(parentId);
-                    updateHorizontalLines();
-                    document.body.offsetHeight;
-                }, 50);
-            }
+            // Update horizontal lines
+            setTimeout(updateHorizontalLines, 10);
         }
         
         showMessage(`Node "${name}" deleted successfully.`, 'success');
