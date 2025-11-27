@@ -400,26 +400,24 @@ async function applyFilters() {
 }
 // NEW: Function to cache all node stats needed for connection filtering
 async function fetchAllStats() {
-    // If we already have all stats, don't fetch again
-    if (Object.keys(nodeStats).length > 0) {
+    // If already cached, don't refetch
+    if (Object.keys(nodeStats).length === Object.keys(nodeMap).length && Object.keys(nodeMap).length > 0) {
         return;
     }
 
     try {
-        // Use the new /stats/all endpoint
-        const response = await fetchWithRetry('/stats/all');
-        const allStats = await response.json();
-
+        const allStats = await fetchWithRetry('/stats/all');
+        
         // Update nodeStats with the new data
-        Object.entries(allStats).forEach(([nodeId, stats]) => {
+        for (const [nodeId, stats] of Object.entries(allStats)) {
             nodeStats[nodeId] = {
                 inboundCount: stats.total_inbound_count || 0,
                 outboundCount: stats.total_outbound_count || 0
             };
-        });
+        }
     } catch (e) {
         console.warn('Failed to fetch all stats:', e);
-        // Initialize with zeros if the request fails
+        // Fallback: set all to 0 but don't block the UI
         Object.keys(nodeMap).forEach(id => {
             nodeStats[id] = { inboundCount: 0, outboundCount: 0 };
         });
