@@ -896,6 +896,95 @@ function closeSearchLinkModal() {
         modal.classList.remove('flex');
     }
 }
+function deleteRelationFromModal() {
+    console.warn('deleteRelationFromModal is not implemented yet.');
+}
+function handleSearch() {
+    const input = document.getElementById('search-input');
+    const statusEl = document.getElementById('search-status-message');
+    const listEl = document.getElementById('search-results-list');
+    const query = (input?.value || '').trim().toLowerCase();
+
+    listEl.innerHTML = '';
+    document.getElementById('confirm-link-button').disabled = true;
+
+    if (!query || query.length < 2) {
+        if (statusEl) statusEl.textContent = 'Type at least 2 characters to search.';
+        return;
+    }
+
+    const results = [];
+    for (const nodeId in nodeMap) {
+        const node = nodeMap[nodeId];
+        const name = (node.name || '').toLowerCase();
+        const desc = (node.description || '').toLowerCase();
+        if (name.includes(query) || desc.includes(query)) {
+            results.push(node);
+        }
+    }
+
+    if (!results.length) {
+        if (statusEl) statusEl.textContent = 'No nodes found for that search.';
+        return;
+    }
+
+    if (statusEl) statusEl.textContent = `Found ${results.length} node(s).`;
+    results.forEach(node => {
+        const li = document.createElement('li');
+        li.className = 'flex items-center justify-between bg-white rounded px-2 py-1 text-sm';
+
+        const label = document.createElement('label');
+        label.className = 'flex items-center space-x-2 flex-1 cursor-pointer';
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.value = node.contentId;
+        checkbox.dataset.id = node.contentId;
+        checkbox.addEventListener('change', () => {
+            const anyChecked = listEl.querySelectorAll('input[type="checkbox"]:checked').length > 0;
+            document.getElementById('confirm-link-button').disabled = !anyChecked;
+        });
+
+        const span = document.createElement('span');
+        span.textContent = `${node.friendlyId || ''} ${node.name || ''}`.trim();
+
+        label.appendChild(checkbox);
+        label.appendChild(span);
+        li.appendChild(label);
+        listEl.appendChild(li);
+    });
+}
+
+async function handleLinkSelected() {
+    const parentId = document.getElementById('link-modal-parent-id').value;
+    const listEl = document.getElementById('search-results-list');
+    const checked = Array.from(
+        listEl.querySelectorAll('input[type="checkbox"]:checked')
+    );
+
+    if (!parentId || !checked.length) return;
+
+    try {
+        for (const cb of checked) {
+            const childId = cb.dataset.id;
+            await fetchWithRetry('/relation/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ parentId, childId })
+            });
+        }
+        showMessage('Links created successfully.', 'success');
+        closeSearchLinkModal();
+
+        // focus parent and re-render
+        nodeToFocusId = parentId;
+        preserveViewport = false;
+        await loadAndRenderVisuals(parentId);
+    } catch (e) {
+        console.error('Error linking nodes:', e);
+        showMessage(`Failed to create links: ${e.message}`, 'error');
+    }
+}
 // DOMContentLoaded: attach listeners, save/restore viewport positions
 document.addEventListener('DOMContentLoaded', () => {
     // Save viewport position on scroll so it can be restored on reloads
