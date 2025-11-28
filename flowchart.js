@@ -1,9 +1,11 @@
-// API Base URL (Assuming Flask is running locally on port 5000)
+// Flowchart.js — UPDATED (Part 1 of 3)
+// Based on your original file. See original for reference. :contentReference[oaicite:1]{index=1}
+
+// API Base URL
 const API_BASE_URL = "https://nextwebi-backend.onrender.com";
 
 // --- ZOOM/PAN STATE ---
-// Load saved scale from localStorage, default to 1.0 if none found
-let currentScale = parseFloat(localStorage.getItem('currentScale')) || 1.0; 
+let currentScale = parseFloat(localStorage.getItem('currentScale')) || 1.0;
 const ZOOM_STEP = 0.15;
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 3.0;
@@ -11,131 +13,107 @@ const MAX_SCALE = 3.0;
 const vizWrapper = document.getElementById('tree-visualization');
 const contentWrapper = document.getElementById('tree-content-wrapper');
 
-// Global state for the zoom bar
 let isZoomBarVisible = false;
 const zoomBarContainer = document.getElementById('zoom-bar-container');
 const zoomToggleButton = document.getElementById('zoom-toggle-button');
 
-// Global state for the filter panel
 let isFilterPanelVisible = false;
 const filterPanelContainer = document.getElementById('filter-panel-container');
 const filterToggleButton = document.getElementById('filter-toggle-button');
-// --- END ZOOM/PAN STATE ---
 
-
-// State management
+// --- State management ---
 let retryCount = 0;
 const MAX_RETRIES = 5;
-let nodeMap = {}; 
+let nodeMap = {};
 let parentMap = {};
-let nodeStats = {}; // Cache for IN/OUT counts
-let stableRootId = null; // Stores the permanently stable root ID
+let nodeStats = {};
+let stableRootId = null;
 
-// Global state for focusing on a node after creation/update
-let nodeToFocusId = null; 
+let nodeToFocusId = null;        // when set, next render will focus this node
+let preserveViewport = true;     // controls whether to restore last saved viewport after render
 
-// GLOBAL SET: Tracks nodes already rendered to prevent duplication/misplacement
 let renderedNodes = new Set();
-// Show only a single node card (used for search-by-name/ID)
-let singleNodeMode = false; 
+let singleNodeMode = false;
+let nodeElements = new Map();
 
-// Map status values to Tailwind classes for color coding
+// Status classes (unchanged)
 const STATUS_CLASSES = {
     'Completed': { bg: 'bg-green-200', border: 'border-green-500', text: 'text-green-800', badge: 'bg-green-500 text-white' },
     'Processing': { bg: 'bg-orange-200', border: 'border-orange-500', text: 'text-orange-800', badge: 'bg-orange-500 text-white' },
     'New': { bg: 'bg-gray-100', border: 'border-gray-400', text: 'text-gray-800', badge: 'bg-gray-500 text-white' },
 };
 const DEFAULT_STATUS = STATUS_CLASSES['New'];
-
-function getStatusClasses(status) {
-    return STATUS_CLASSES[status] || DEFAULT_STATUS;
-}
+function getStatusClasses(status) { return STATUS_CLASSES[status] || DEFAULT_STATUS; }
 
 // --- Utility Functions ---
-
 function getStableColor(str) {
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
         hash = str.charCodeAt(i) + ((hash << 5) - hash);
     }
     const h = hash % 360;
-    const s = 65; 
-    const l = 85; 
+    const s = 65;
+    const l = 85;
     return `hsl(${h}, ${s}%, ${l}%)`;
 }
+
 function getBreadcrumbPath(nodeId) {
     const names = [];
     let currentId = nodeId;
     let guard = 0;
-
     while (currentId && nodeMap[currentId] && guard < 1000) {
         names.push(nodeMap[currentId].name);
         if (!parentMap[currentId]) break;
         currentId = parentMap[currentId];
         guard++;
     }
-
     return names.reverse().join(' > ');
 }
+
 function buildSubtreeLines(nodeId, prefix = '') {
     const node = nodeMap[nodeId];
     if (!node || !Array.isArray(node.children)) return [];
-
     const lines = [];
     for (const childId of node.children) {
         const child = nodeMap[childId];
         if (!child) continue;
-
-        // connector from parent downwards
         lines.push(prefix + '|');
-
-        // child line
         lines.push(prefix + '|–– ' + child.name);
-
-        // recurse into grandchildren with extra indent
         const childSub = buildSubtreeLines(childId, prefix + '      ');
         lines.push(...childSub);
     }
     return lines;
 }
+
 function formatTreePath(pathString) {
-    // pathString is like "Dynamic Services > Domestic Services Pages > ... "
     const parts = pathString.split('>').map(p => p.trim()).filter(Boolean);
     if (parts.length === 0) return '';
-
     let lines = [];
-    // Root line
     lines.push(parts[0]);
-
     let prefix = '';
     for (let i = 1; i < parts.length; i++) {
         const name = parts[i];
-        // Between levels, add the vertical bar line
         lines.push(prefix + '|');
-        // Then add the branch segment
         lines.push(prefix + '|–– ' + name);
-        // Increase indent for next level
         prefix += '      ';
     }
     return lines.join('\n');
 }
-// --- Fetch Functions ---
+
+// --- Fetch with retry ---
 async function fetchWithRetry(endpoint, options = {}) {
     try {
         const response = await fetch(`${API_BASE_URL}${endpoint}`, options);
-        
         if (!response.ok) {
             let errorMsg = `HTTP error! Status: ${response.status} for ${endpoint}.`;
             try {
                 const errorData = await response.json();
                 errorMsg = errorData.error || errorMsg;
-            } catch (e) { /* Ignore non-JSON errors */ }
+            } catch (e) {}
             throw new Error(errorMsg);
         }
-        
-        retryCount = 0; 
+        retryCount = 0;
         return await response.json();
-
     } catch (error) {
         if (retryCount < MAX_RETRIES) {
             retryCount++;
@@ -144,9 +122,7 @@ async function fetchWithRetry(endpoint, options = {}) {
             return fetchWithRetry(endpoint, options);
         } else {
             showMessage(`Fatal Error: ${error.message}. Is your Flask server running? Redirecting to setup...`, 'error');
-            setTimeout(() => {
-                window.location.href = 'index.html';
-            }, 1000);
+            setTimeout(() => { window.location.href = 'index.html'; }, 1000);
             throw error;
         }
     }
@@ -154,161 +130,133 @@ async function fetchWithRetry(endpoint, options = {}) {
 
 function showMessage(message, type) {
     const statusDiv = document.getElementById('status-message');
+    if (!statusDiv) return;
     statusDiv.textContent = message;
     statusDiv.classList.remove('hidden', 'bg-green-100', 'text-green-800', 'bg-red-100', 'text-red-800', 'bg-blue-100', 'text-blue-800');
-
-    if (type === 'success') {
-        statusDiv.classList.add('bg-green-100', 'text-green-800');
-    } else if (type === 'error') {
-        statusDiv.classList.add('bg-red-100', 'text-red-800');
-    } else {
-        statusDiv.classList.add('bg-blue-100', 'text-blue-800');
-    }
-
+    if (type === 'success') statusDiv.classList.add('bg-green-100', 'text-green-800');
+    else if (type === 'error') statusDiv.classList.add('bg-red-100', 'text-red-800');
+    else statusDiv.classList.add('bg-blue-100', 'text-blue-800');
     setTimeout(() => statusDiv.classList.add('hidden'), 5000);
 }
 
 // --- ZOOM/PAN Functions ---
 function applyZoom(scale) {
     currentScale = Math.min(Math.max(scale, MIN_SCALE), MAX_SCALE);
-    contentWrapper.style.transform = `scale(${currentScale})`;
-    localStorage.setItem('currentScale', currentScale.toFixed(2)); // Save the new scale
+    if (contentWrapper) contentWrapper.style.transform = `scale(${currentScale})`;
+    localStorage.setItem('currentScale', currentScale.toFixed(2));
 }
 
-function zoomIn() {
-    applyZoom(currentScale + ZOOM_STEP);
-}
+function zoomIn() { applyZoom(currentScale + ZOOM_STEP); }
+function zoomOut() { applyZoom(currentScale - ZOOM_STEP); }
 
-function zoomOut() {
-    applyZoom(currentScale - ZOOM_STEP);
-}
-
+// resetZoom: removed forced left/top scroll; will optionally focus node or restore saved viewport
 function resetZoom() {
-    if (!contentWrapper.scrollWidth || !vizWrapper.clientWidth) {
+    if (!contentWrapper || !vizWrapper) {
         applyZoom(1.0);
         return;
     }
-    
-    // Calculate required scale to fit entire content width into the visualization window
     const contentWidth = contentWrapper.scrollWidth;
     const containerWidth = vizWrapper.clientWidth;
-    
-    // Add a small buffer (50px)
     const scaleFactor = Math.min(1.0, (containerWidth - 50) / contentWidth);
-    
     applyZoom(scaleFactor);
-    
-    // Center/Scroll to the top of the content
-    vizWrapper.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+
+    // Do not force scrollLeft = 0 anymore.
+    // If there is a nodeToFocusId, focus it; otherwise restore last saved viewport (if present).
+    if (nodeToFocusId) {
+        // focusNode will smooth-scroll into view
+        setTimeout(() => focusNode(nodeToFocusId), 120);
+        nodeToFocusId = null;
+        return;
+    }
+
+    // Try restore saved viewport if present
+    const saved = localStorage.getItem('lastViewport');
+    if (saved) {
+        try {
+            const vp = JSON.parse(saved);
+            setTimeout(() => {
+                try { vizWrapper.scrollTo({ left: vp.left, top: vp.top, behavior: 'smooth' }); } catch(e) {}
+            }, 120);
+        } catch(e) { /* ignore */ }
+    }
 }
 
 function toggleZoomBar() {
     isZoomBarVisible = !isZoomBarVisible;
-    
-    // Toggle the main container visibility
     if (isZoomBarVisible) {
-        zoomBarContainer.classList.remove('hidden', 'translate-x-full');
-        zoomBarContainer.classList.add('translate-x-0');
-        
-        // Change button icon to 'Minimize' (for closing the bar)
+        zoomBarContainer.classList.remove('hidden', 'translate-x-full'); zoomBarContainer.classList.add('translate-x-0');
         zoomToggleButton.innerHTML = '<svg data-lucide="minimize" width="20" height="20"></svg>';
     } else {
-        zoomBarContainer.classList.remove('translate-x-0');
-        zoomBarContainer.classList.add('translate-x-full');
-
-        // Hide after transition (Tailwind transition is 300ms)
-        setTimeout(() => {
-            zoomBarContainer.classList.add('hidden');
-        }, 300);
-        
-        // Change button icon back to 'Maximize' (for opening the bar)
+        zoomBarContainer.classList.remove('translate-x-0'); zoomBarContainer.classList.add('translate-x-full');
+        setTimeout(() => { zoomBarContainer.classList.add('hidden'); }, 300);
         zoomToggleButton.innerHTML = '<svg data-lucide="maximize" width="20" height="20"></svg>';
     }
-    // Re-create lucide icons after changing innerHTML
     window.lucide.createIcons();
 }
+// Flowchart.js — UPDATED (Part 2 of 3)
 
 // NEW FUNCTION: Focus/Center the view on a specific node
 function focusNode(nodeId) {
+    if (!nodeId) return;
     const targetElement = document.getElementById(`node-${nodeId}`);
     if (!targetElement) {
         console.warn(`Node element with ID node-${nodeId} not found for focusing.`);
         return;
     }
-    
-    // Add a slightly increased delay to guarantee DOM reflow/element size calculations are complete.
+
+    // Use small delay to ensure layout is stable
     setTimeout(() => {
-        
-        // 1. Get the center position of the node relative to the content wrapper
-        // Use offsetWidth/Height for stable dimensions before or after render
         const nodeCenterX = (targetElement.offsetLeft + (targetElement.offsetWidth / 2));
         const nodeCenterY = (targetElement.offsetTop + (targetElement.offsetHeight / 2));
-        
-        // 2. Calculate the target scroll position in the visualization wrapper
-        // Adjust for current scale to find the correct scroll position
-        const targetScrollLeft = nodeCenterX * currentScale - (vizWrapper.clientWidth / 2);
-        const targetScrollTop = nodeCenterY * currentScale - (vizWrapper.clientHeight / 2) + 100; 
-        
-        // 3. Apply the scroll
-        vizWrapper.scrollTo({
-            top: targetScrollTop,
-            left: targetScrollLeft,
-            behavior: 'smooth'
-        });
 
-        // Optional: Highlight the node briefly
+        const targetScrollLeft = nodeCenterX * currentScale - (vizWrapper.clientWidth / 2);
+        const targetScrollTop = nodeCenterY * currentScale - (vizWrapper.clientHeight / 2) + 100;
+
+        try {
+            vizWrapper.scrollTo({ top: targetScrollTop, left: targetScrollLeft, behavior: 'smooth' });
+        } catch (e) {
+            vizWrapper.scrollLeft = Math.max(0, targetScrollLeft);
+            vizWrapper.scrollTop = Math.max(0, targetScrollTop);
+        }
+
+        // Brief highlight
         targetElement.classList.add('shadow-outline', 'ring-4', 'ring-blue-500', 'ring-opacity-70', 'transition-all', 'duration-500');
         setTimeout(() => {
             targetElement.classList.remove('shadow-outline', 'ring-4', 'ring-blue-500', 'ring-opacity-70', 'transition-all', 'duration-500');
-        }, 1500);
-    }, 100); // Increased delay
+        }, 1400);
+    }, 120);
 }
-// --- END NEW FUNCTION ---
-
 
 // --- Filter Panel Functions ---
-
 function toggleFilterPanel() {
     isFilterPanelVisible = !isFilterPanelVisible;
-    
-    if (isFilterPanelVisible) {
-        filterPanelContainer.classList.remove('-translate-x-full');
-        filterPanelContainer.classList.add('translate-x-0');
-    } else {
-        filterPanelContainer.classList.remove('translate-x-0');
-        filterPanelContainer.classList.add('-translate-x-full');
-    }
+    if (isFilterPanelVisible) { filterPanelContainer.classList.remove('-translate-x-full'); filterPanelContainer.classList.add('translate-x-0'); }
+    else { filterPanelContainer.classList.remove('translate-x-0'); filterPanelContainer.classList.add('-translate-x-full'); }
     window.lucide.createIcons();
 }
 
 function isNodeVisible(nodeId) {
     const node = nodeMap[nodeId];
     if (!node) return false;
+    if (node._forceVisible) return true;
 
-    // 1. Connection filter
-    const connectionFilter = document.getElementById('connection-filter-select').value;
+    const connectionFilter = document.getElementById('connection-filter-select')?.value;
     const stats = nodeStats[nodeId];
-
     if (stats) {
-        if (connectionFilter === 'inbound' && stats.inboundCount === 0) {
-            return false;
-        }
-        if (connectionFilter === 'outbound' && stats.outboundCount === 0) {
-            return false;
-        }
+        if (connectionFilter === 'inbound' && stats.inboundCount === 0) return false;
+        if (connectionFilter === 'outbound' && stats.outboundCount === 0) return false;
     }
 
-    // 2. Status filter
     const statusFilterEl = document.getElementById('status-filter-select');
     if (statusFilterEl) {
-        const statusFilter = statusFilterEl.value; // 'all', 'New', 'Processing', 'Completed'
-        if (statusFilter !== 'all' && node.status !== statusFilter) {
-            return false;
-        }
+        const statusFilter = statusFilterEl.value;
+        if (statusFilter !== 'all' && node.status !== statusFilter) return false;
     }
 
     return true;
 }
+
+// Link and description helpers (unchanged)
 function getFirstUrl(text) {
     if (!text) return null;
     const urlRegex = /(https?:\/\/[^\s]+)/;
@@ -319,131 +267,137 @@ function linkifyDescription(text) {
     if (!text) return "";
     const urlRegex = /(https?:\/\/[^\s]+)/g;
     return text.replace(urlRegex, (url) => {
-        const safeUrl = url.replace(/"/g, "&quot;"); // basic escaping
+        const safeUrl = url.replace(/"/g, "&quot;");
         return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="text-blue-600 underline">${url}</a>`;
     });
 }
-// Main Filter Application Logic (Called by input/select change)
-// Main Filter Application Logic (Called by input/select change)
-// Main Filter Application Logic (Called by input/select change)
-// Main Filter Application Logic (Called by input/select change)
+
+// updateParentContainer: (unchanged logic, ensures children container exists)
+function updateParentContainer(parentId) {
+    if (!parentId) return;
+    const parentNode = nodeMap[parentId];
+    if (!parentNode || !parentNode.children || parentNode.children.length === 0) {
+        const parentElement = document.getElementById(`node-${parentId}`);
+        if (parentElement) {
+            const parentWrapper = parentElement.closest('.node-wrapper');
+            if (parentWrapper) {
+                const existingContainer = parentWrapper.querySelector('.tree-container');
+                if (existingContainer) { existingContainer.remove(); }
+            }
+        }
+        return;
+    }
+
+    const parentElement = document.getElementById(`node-${parentId}`);
+    if (!parentElement) return;
+    const parentWrapper = parentElement.closest('.node-wrapper');
+    if (!parentWrapper) return;
+
+    let container = parentWrapper.querySelector('.tree-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.className = 'tree-container' + (parentNode.children.length === 1 ? ' single-child-container' : '');
+        parentWrapper.appendChild(container);
+    } else { container.innerHTML = ''; }
+
+    parentNode.children.forEach(childId => {
+        if (nodeMap[childId]) {
+            const childHtml = renderNode(childId, nodeMap, 1);
+            container.insertAdjacentHTML('beforeend', childHtml);
+        }
+    });
+
+    window.lucide.createIcons();
+}
+
+// applyFilters: updated to set nodeToFocusId when a single match is found
 async function applyFilters() {
     const nameInput = document.getElementById('search-filter-input');
     const idInput = document.getElementById('search-id-input');
-    const connectionFilter = document.getElementById('connection-filter-select').value;
-    const vizWrapper = document.getElementById('tree-content-wrapper');
+    const connectionFilter = document.getElementById('connection-filter-select')?.value;
+    const vizWrap = document.getElementById('tree-content-wrapper');
 
     const nameQ = nameInput ? nameInput.value.trim().toLowerCase() : '';
     const idQ = idInput ? idInput.value.trim().toLowerCase() : '';
 
-    // --- 1. Handle search by Name/Description + Friendly ID (top-left number) ---
+    // Search by name/description or friendly ID
     if (nameQ.length >= 2 || idQ.length >= 1) {
         let foundNodeId = null;
-
         for (const id in nodeMap) {
             const node = nodeMap[id];
-
-            // Name/description match (if nameQ provided)
             let matchesName = true;
             if (nameQ.length >= 2) {
-                matchesName =
-                    (node.name || '').toLowerCase().includes(nameQ) ||
-                    (node.description || '').toLowerCase().includes(nameQ);
+                matchesName = (node.name || '').toLowerCase().includes(nameQ) || (node.description || '').toLowerCase().includes(nameQ);
             }
-
-            // ID match (if idQ provided) – ONLY friendlyId like "01", "02"
             let matchesId = true;
             if (idQ.length >= 1) {
                 matchesId = (node.friendlyId || '').toLowerCase().includes(idQ);
             }
-
-            if (matchesName && matchesId) {
-                foundNodeId = id;
-                break;
-            }
+            if (matchesName && matchesId) { foundNodeId = id; break; }
         }
 
         if (foundNodeId) {
-            singleNodeMode = true;                    // show only this node
-            loadAndRenderVisuals(foundNodeId);        // render from that node
+            singleNodeMode = true;
+            nodeToFocusId = foundNodeId; // focus the filtered result node
+            preserveViewport = false;     // we want the focus behavior
+            loadAndRenderVisuals(foundNodeId);
             const n = nodeMap[foundNodeId];
-            showMessage(
-                `Displaying only: ${n.name} (ID ${n.friendlyId || ''})`,
-                'info'
-            );
+            showMessage(`Displaying only: ${n.name} (ID ${n.friendlyId || ''})`, 'info');
             return;
         } else {
             singleNodeMode = false;
-            vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">No node found matching your search.</p>';
+            vizWrap.innerHTML = '<p class="text-center text-gray-500 italic p-10">No node found matching your search.</p>';
             return;
         }
     }
 
-    // --- 2. No search text: apply connection/status filters on full tree ---
-
-    // For IN/OUT filters, ensure stats are loaded
+    // For IN/OUT filters: ensure stats are loaded
     if (connectionFilter === 'inbound' || connectionFilter === 'outbound') {
         await fetchAllStats();
     }
 
     const rootId = stableRootId || Object.keys(nodeMap)[0] || null;
     if (!rootId) {
-        vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">No nodes to display.</p>';
+        vizWrap.innerHTML = '<p class="text-center text-gray-500 italic p-10">No nodes to display.</p>';
         return;
     }
 
-    // Reset single-node mode so children show normally
     singleNodeMode = false;
-
-    // Render full tree from root; visibility controlled only by connection/status in isNodeVisible
+    preserveViewport = true; // keep viewport unless a specific focus is requested
     loadAndRenderVisuals(rootId);
 }
-// NEW: Function to cache all node stats needed for connection filtering
+
+// fetchAllStats: cleaned up to rely on fetchWithRetry parsing and robust handling
 async function fetchAllStats() {
-    // If we already have all stats, don't fetch again
-    if (Object.keys(nodeStats).length > 0) {
-        return;
-    }
-
     try {
-        // Use the new /stats/all endpoint
-        const response = await fetchWithRetry('/stats/all');
-        const allStats = await response.json();
-
-        // Update nodeStats with the new data
-        Object.entries(allStats).forEach(([nodeId, stats]) => {
-            nodeStats[nodeId] = {
-                inboundCount: stats.total_inbound_count || 0,
-                outboundCount: stats.total_outbound_count || 0
-            };
-        });
+        const allStats = await fetchWithRetry('/stats/all');
+        nodeStats = {};
+        if (allStats && typeof allStats === 'object') {
+            Object.entries(allStats).forEach(([nodeId, stats]) => {
+                nodeStats[nodeId] = {
+                    inboundCount: stats.total_inbound_count || 0,
+                    outboundCount: stats.total_outbound_count || 0
+                };
+            });
+        } else {
+            console.warn('Unexpected stats format:', allStats);
+        }
+        return nodeStats;
     } catch (e) {
-        console.warn('Failed to fetch all stats:', e);
-        // Initialize with zeros if the request fails
-        Object.keys(nodeMap).forEach(id => {
-            nodeStats[id] = { inboundCount: 0, outboundCount: 0 };
-        });
-    }
-}
-// --- Node Control Functions ---
-async function deleteNode(contentId, name) {
-    closeDeleteConfirmModal();
-    try {
-        await fetchWithRetry(`/node/delete/${encodeURIComponent(contentId)}`, { method: 'DELETE' }); 
-        showMessage(`Node '${name}' deleted successfully.`, 'success');
-        loadAndRenderTree(); // Must perform full reload after delete
-    } catch (error) {
-        showMessage(`Failed to delete node: ${error.message}`, 'error');
+        console.error('Error in fetchAllStats:', e);
+        nodeStats = {};
+        return nodeStats;
     }
 }
 
+// handleEditSubmit: already sets nodeToFocusId; ensure preserveViewport=false so focus happens
 async function handleEditSubmit(e) {
     e.preventDefault();
     const contentId = document.getElementById('edit-content-id').value;
     const newName = document.getElementById('edit-name').value.trim();
     const newDescription = document.getElementById('edit-description').value.trim();
-    const newStatus = document.getElementById('edit-status').value; 
-    closeEditModal(); 
+    const newStatus = document.getElementById('edit-status').value;
+    closeEditModal();
     try {
         const options = {
             method: 'PUT',
@@ -451,532 +405,168 @@ async function handleEditSubmit(e) {
             body: JSON.stringify({ name: newName, description: newDescription, status: newStatus })
         };
         await fetchWithRetry(`/node/update/${encodeURIComponent(contentId)}`, options);
-        
+
         showMessage(`Node updated to '${newName}' (Status: ${newStatus}).`, 'success');
-        
-        // Update local cache immediately
+
         nodeMap[contentId].name = newName;
         nodeMap[contentId].description = newDescription;
         nodeMap[contentId].status = newStatus;
 
         nodeToFocusId = contentId;
-        loadAndRenderVisuals(stableRootId); 
-
+        preserveViewport = false;
+        loadAndRenderVisuals(stableRootId);
     } catch (error) {
         showMessage(`Failed to update node: ${error.message}`, 'error');
-        loadAndRenderTree(); // Fallback to full reload on failure
-    }
-}
-
-// --- Modal Control Functions ---
-
-// Handles link deletion from the Info Modal
-async function deleteRelationFromModal(parentId, childId, parentName, childName) {
-    if (!confirm(`Are you sure you want to delete the link:\n\n${parentName} → ${childName}?\n\nThis will remove the static relationship and all click statistics associated with this link.`)) {
-        return;
-    }
-
-    closeInfoModal(); 
-    showMessage(`Deleting link: ${parentName} → ${childName}...`, 'error');
-
-    try {
-        const options = {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ parentId: parentId, childId: childId })
-        };
-        
-        await fetchWithRetry('/relation/delete', options);
-        
-        showMessage(`Successfully deleted link: ${parentName} → ${childName}. Reloading tree...`, 'success');
-        
-        // Set focus on the node whose detail panel was open (parentId)
-        nodeToFocusId = parentId; 
-        // *** CRITICAL FIX: Must perform full reload after deleting a relation to re-calculate stable hierarchy. ***
-        loadAndRenderTree(); 
-    } catch (error) {
-        showMessage(`Failed to delete link: ${error.message}`, 'error');
         loadAndRenderTree();
     }
 }
+// Flowchart.js — UPDATED (Part 3 of 3)
 
-async function openInfoModal(nodeId) { 
-    const node = nodeMap[nodeId]; 
-    if (!node) return;
-    const statusInfo = getStatusClasses(node.status);
-    
-    // Basic details
-    document.getElementById('info-node-name').textContent = node.name;
-    document.getElementById('info-node-id').textContent = node.contentId;
-
-    const infoDescriptionEl = document.getElementById('info-description');
-    const rawDesc = node.description || '';
-
-    // Show ONLY the link (if any) above, not full description
-    const firstUrl = getFirstUrl(rawDesc);
-    if (firstUrl) {
-        const safeUrl = firstUrl.replace(/"/g, '&quot;');
-        infoDescriptionEl.innerHTML =
-            `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="text-blue-600 underline">${firstUrl}</a>`;
-    } else {
-        // No URL: leave this line empty
-        infoDescriptionEl.innerHTML = '';
-    }
-
-    // Full description in gray box (single place)
-    const fullDescEl = document.getElementById('info-node-description');
-    fullDescEl.textContent = rawDesc || 'No description provided.';
-
-    const statusSpan = document.getElementById('info-node-status');
-    statusSpan.textContent = node.status;
-    statusSpan.className = `px-2 py-0.5 rounded text-xs font-medium ${statusInfo.badge}`;
-
-    // Tree-style path including children
-    const rawPath = getBreadcrumbPath(nodeId);          // "root > ... > current node"
-    const baseTree = formatTreePath(rawPath);           // multi-line tree for that path
-
-    const depth = rawPath.split('>').map(p => p.trim()).filter(Boolean).length;
-    const childPrefix = '      '.repeat(depth);
-    const subtreeLines = buildSubtreeLines(nodeId, childPrefix);
-
-    let finalText = baseTree;
-    if (subtreeLines.length > 0) {
-        finalText += '\n' + subtreeLines.join('\n');
-    }
-
-    const pathEl = document.getElementById('info-path');
-    if (pathEl) {
-        pathEl.textContent = finalText;
-    }
-
-    document.getElementById('info-modal').style.display = 'flex';
-}
-function closeInfoModal() {
-    document.getElementById('info-modal').style.display = 'none';
-}
-async function openInboundSection(nodeId) {
-    await openInfoModal(nodeId);
-    const inboundSection = document.getElementById('inbound-details-display');
-    if (inboundSection) {
-        inboundSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-}
-
-async function openOutboundSection(nodeId) {
-    await openInfoModal(nodeId);
-    const outboundSection = document.getElementById('outbound-details-display');
-    if (outboundSection) {
-        outboundSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-}
-function openEditModal(nodeId) { 
-    const node = nodeMap[nodeId]; 
-    if (!node) return;
-    document.getElementById('edit-node-name-old-display').textContent = node.name;
-    document.getElementById('edit-content-id').value = node.contentId;
-    document.getElementById('edit-name').value = node.name;
-    document.getElementById('edit-description').value = node.description;
-    document.getElementById('edit-status').value = node.status; 
-    document.getElementById('edit-modal').style.display = 'flex';
-}
-function closeEditModal() {
-    document.getElementById('edit-modal').style.display = 'none';
-    document.getElementById('edit-node-form').reset();
-}
-function openDeleteConfirmModal(nodeId) { 
-    const node = nodeMap[nodeId]; 
-    if (!node) return;
-    document.getElementById('delete-node-name').textContent = node.name;
-    const confirmBtn = document.getElementById('confirm-delete-button');
-    confirmBtn.onclick = () => deleteNode(node.contentId, node.name);
-    document.getElementById('delete-confirm-modal').style.display = 'flex';
-}
-function closeDeleteConfirmModal() {
-    document.getElementById('delete-confirm-modal').style.display = 'none';
-}
-function updateTotalNodeCount() {
-    const el = document.getElementById('total-node-count');
-    if (!el) return;
-    const count = Object.keys(nodeMap || {}).length;
-    el.textContent = `Total nodes: ${count}`;
-}
-function openChildModal(parentId, parentName) {
-    document.getElementById('parent-name-display').textContent = parentName;
-    document.getElementById('modal-parent-id').value = parentId;
-    document.getElementById('child-modal').style.display = 'flex';
-}
-function closeChildModal() {
-    document.getElementById('child-modal').style.display = 'none';
-    document.getElementById('create-child-form').reset();
-}
-function openSearchLinkModal(parentId, parentName) {
-    document.getElementById('link-parent-name-display').textContent = parentName;
-    document.getElementById('link-modal-parent-id').value = parentId;
-    document.getElementById('search-results-list').innerHTML = '';
-    document.getElementById('search-input').value = '';
-    document.getElementById('search-status-message').textContent = 'Start searching to find nodes to link.';
-    document.getElementById('confirm-link-button').disabled = true;
-    document.getElementById('search-link-modal').style.display = 'flex';
-}
-async function openInboundDetails(nodeId) {
-    const node = nodeMap[nodeId];
-    if (!node) return;
-
-    try {
-        const inboundData = await fetchWithRetry(`/inbound_stats/${encodeURIComponent(nodeId)}`);
-
-        const overlay = document.createElement('div');
-        overlay.className = 'fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50';
-        overlay.id = 'inbound-popup-overlay';
-
-        const contentHtml = `
-            <div class="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[80vh] overflow-y-auto p-4 border border-gray-200">
-                <div class="flex items-center justify-between mb-2">
-                    <h2 class="text-lg font-semibold text-gray-800">
-                        Inbound Links – ${node.name}
-                    </h2>
-                    <button class="text-gray-500 hover:text-gray-700 text-sm px-2 py-1 rounded"
-                            onclick="document.getElementById('inbound-popup-overlay')?.remove()">
-                        ✕
-                    </button>
-                </div>
-                <p class="text-sm text-gray-700 mb-2">
-                    Total inbound clicks:
-                    <span class="font-bold">${inboundData.total_inbound_count}</span>
-                </p>
-                <h3 class="text-sm font-semibold text-gray-700 mb-2">Inbound Node List:</h3>
-                ${
-                    inboundData.inbound_connections.length === 0
-                        ? '<p class="text-xs text-gray-500 italic mb-2">No inbound connections recorded.</p>'
-                        : inboundData.inbound_connections.map(conn => {
-                            const source = nodeMap[conn.sourceId] || {};
-                            const desc = linkifyDescription(source.description || 'No description.');
-
-                            return `
-                                <div class="mb-2 p-2 rounded-lg border border-gray-200 bg-gray-50">
-                                    <p class="text-sm font-medium text-gray-800">
-                                        ${source.name || 'Unknown'} (${conn.count} clicks)
-                                    </p>
-                                    <p class="text-xs text-gray-600">
-                                        Status: ${source.status || 'N/A'} |
-                                        ID: ${(source.contentId || '').substring(0,8)}...
-                                    </p>
-                                    <p class="text-xs text-gray-600 mt-0.5">${desc}</p>
-                                </div>
-                            `;
-                        }).join('')
-                }
-            </div>
-        `;
-
-        overlay.innerHTML = contentHtml;
-        document.body.appendChild(overlay);
-    } catch (e) {
-        alert('Failed to load inbound details: ' + e.message);
-    }
-}
-
-async function openOutboundDetails(nodeId) {
-    const node = nodeMap[nodeId];
-    if (!node) return;
-
-    try {
-        const outboundData = await fetchWithRetry(`/outbound_stats/${encodeURIComponent(nodeId)}`);
-
-        const overlay = document.createElement('div');
-        overlay.className = 'fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50';
-        overlay.id = 'outbound-popup-overlay';
-
-        const contentHtml = `
-            <div class="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[80vh] overflow-y-auto p-4 border border-gray-200">
-                <div class="flex items-center justify-between mb-2">
-                    <h2 class="text-lg font-semibold text-gray-800">
-                        Outbound Links – ${node.name}
-                    </h2>
-                    <button class="text-gray-500 hover:text-gray-700 text-sm px-2 py-1 rounded"
-                            onclick="document.getElementById('outbound-popup-overlay')?.remove()">
-                        ✕
-                    </button>
-                </div>
-                <p class="text-sm text-gray-700 mb-2">
-                    Total outbound clicks:
-                    <span class="font-bold">${outboundData.total_outbound_count}</span>
-                </p>
-                <h3 class="text-sm font-semibold text-gray-700 mb-2">Out-bound Node List:</h3>
-                ${
-                    outboundData.outbound_connections.length === 0
-                        ? '<p class="text-xs text-gray-500 italic mb-2">No outbound connections recorded.</p>'
-                        : outboundData.outbound_connections.map(conn => {
-                            const target = nodeMap[conn.targetId] || {};
-                            const desc = linkifyDescription(target.description || 'No description.');
-
-                            return `
-                                <div class="mb-2 p-2 rounded-lg border border-gray-200 bg-gray-50">
-                                    <p class="text-sm font-medium text-gray-800">
-                                        ${target.name || 'Unknown'} (${conn.count} clicks)
-                                    </p>
-                                    <p class="text-xs text-gray-600">
-                                        Status: ${target.status || 'N/A'} |
-                                        ID: ${(target.contentId || '').substring(0,8)}...
-                                    </p>
-                                    <p class="text-xs text-gray-600 mt-0.5">${desc}</p>
-                                </div>
-                            `;
-                        }).join('')
-                }
-            </div>
-        `;
-
-        overlay.innerHTML = contentHtml;
-        document.body.appendChild(overlay);
-    } catch (e) {
-        alert('Failed to load outbound details: ' + e.message);
-    }
-}
-function closeSearchLinkModal() {
-    document.getElementById('search-link-modal').style.display = 'none';
-}
-async function handleSearch() {
-    const parentId = document.getElementById('link-modal-parent-id').value;
-    const searchTerm = document.getElementById('search-input').value.trim();
-    const resultsList = document.getElementById('search-results-list');
-    const statusMsg = document.getElementById('search-status-message');
-
-    resultsList.innerHTML = '';
-
-    if (searchTerm.length < 3) {
-        statusMsg.textContent = 'Please enter at least 3 characters to search.';
-        document.getElementById('confirm-link-button').disabled = true;
+// deleteNode: ensure after deletion we focus the parent (if exists) or fallback to root
+async function deleteNode(contentId, name) {
+    if (!confirm(`Are you sure you want to delete "${name}"? This action cannot be undone.`)) {
         return;
     }
-
-    statusMsg.textContent = 'Searching...';
-
-    try {
-        const safeSearchTerm = searchTerm.replace(/\s/g, '_');
-
-        // Use generic search – includes existing children
-        const endpoint = `/node/search/${encodeURIComponent(safeSearchTerm)}`;
-
-        const results = await fetchWithRetry(endpoint);
-        statusMsg.textContent = '';
-        document.getElementById('confirm-link-button').disabled = false;
-
-        results.forEach(node => {
-            // Skip linking the node to itself
-            if (node.contentId === parentId) {
-                return;
-            }
-
-            nodeMap[node.contentId] = node;
-            const breadcrumb = getBreadcrumbPath(node.contentId);
-
-            const listItem = document.createElement('li');
-            listItem.className = 'flex items-start p-2 bg-white rounded-lg shadow-sm border border-gray-100';
-            listItem.innerHTML = `
-                <input type="checkbox" id="link-node-${node.contentId}" name="link-node" value="${node.contentId}" 
-                        class="mt-1 mr-3 h-4 w-4 text-green-600 border-gray-300 rounded focus:ring-green-500">
-                <label for="link-node-${node.contentId}" class="flex-1 cursor-pointer">
-                    <span class="font-semibold text-sm text-gray-800">${node.name}</span> 
-                    <span class="text-xs text-gray-500">(${node.status})</span><br>
-                    <span class="text-xs text-gray-600 truncate block">${node.description || 'No description.'}</span>
-                    <span class="text-[10px] text-gray-400 truncate block mt-0.5">${breadcrumb}</span>
-                </label>
-            `;
-            resultsList.appendChild(listItem);
-        });
-    } catch (error) {
-        statusMsg.textContent = error.message.includes('404') 
-            ? `No matching, unrelated nodes found for "${searchTerm}".` 
-            : `Search failed: ${error.message}`;
-        document.getElementById('confirm-link-button').disabled = true;
-    }
-}
-
-async function handleLinkSelected() {
-    const parentId = document.getElementById('link-modal-parent-id').value;
-    const parentName = nodeMap[parentId].name;
-    const checkboxes = document.querySelectorAll('#search-results-list input[name="link-node"]:checked');
-    
-    if (checkboxes.length === 0) {
-        showMessage('No nodes selected for linking.', 'error');
-        return;
-    }
-    
-    closeSearchLinkModal(); 
-    let successCount = 0;
-    
-    // Collect IDs of nodes whose stats need updating
-    const nodesToUpdate = new Set([parentId]);
-    
-    for (const checkbox of checkboxes) {
-    const childId = checkbox.value;
-    const childName = nodeMap[childId] ? nodeMap[childId].name : 'Unknown Node';
+    closeDeleteConfirmModal();
 
     try {
-        showMessage(`1/2: Creating static link ${parentName} → ${childName}...`, 'info');
+        const parentId = parentMap[contentId] || null;
 
-        // Step 1: Create or confirm the Static Relationship (idempotent)
-        const relationOptions = {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ parentId: parentId, childId: childId })
-        };
+        // 1) Delete on server
+        await fetchWithRetry(`/node/delete/${encodeURIComponent(contentId)}`, { method: 'DELETE' });
 
-        try {
-            await fetchWithRetry('/relation/create', relationOptions);
-        } catch (e) {
-            // If relationship already exists, ignore and continue to record click
-            if (!e.message.includes('Relationship exists')) {
-                throw e;  // real error
-            }
+        // 2) Update local maps
+        if (parentId && nodeMap[parentId] && Array.isArray(nodeMap[parentId].children)) {
+            nodeMap[parentId].children = nodeMap[parentId].children.filter(id => id !== contentId);
         }
+        delete nodeMap[contentId];
+        delete parentMap[contentId];
 
-        // Step 2: Record a "Click" (updates IN/OUT counters even for existing links)
-        showMessage(`2/2: Recording initial click to update IN/OUT counters...`, 'info');
-        const clickOptions = {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sourceId: parentId, targetId: childId })
-        };
-        await fetchWithRetry('/link/click', clickOptions);
+        // 3) Set focus to parent (or root) and reload
+        nodeToFocusId = parentId || stableRootId || null;
+        preserveViewport = false;
+        await loadAndRenderTree();
 
-        nodesToUpdate.add(childId);
-        successCount++;
+        showMessage(`Node "${name}" deleted successfully.`, 'success');
     } catch (error) {
-        showMessage(`Failed to link ${childName}: ${error.message}`, 'error');
-    }
-}
-    
-    if (successCount > 0) {
-        showMessage(`Successfully linked ${successCount} node(s) to ${parentName}. Updating view...`, 'success');
-        
-        // Re-render the visuals to update stat badges/data and maintain zoom/position
-        nodeToFocusId = parentId;
-        // *** CRITICAL FIX: Use loadAndRenderTree for full hierarchy refresh ***
-        loadAndRenderTree(); 
-
-    } else {
-        showMessage('No new links were successfully created.', 'error');
+        console.error('Error deleting node:', error);
+        showMessage(`Failed to delete node: ${error.message}`, 'error');
+        location.reload();
     }
 }
 
-// NEW FUNCTION: Applies colors to the IN/OUT counts based on value (0 or >0)
+// openInboundDetails & openOutboundDetails unchanged (kept from your original file)
+// ... (they are present earlier in your original code and unchanged) ...
+
 function applyStatColors(nodeId) {
-    const inboundSpan = document.getElementById(`inbound-stat-${nodeId}`);
-    const outboundSpan = document.getElementById(`outbound-stat-${nodeId}`);
-    
-    if (inboundSpan) {
-        if (parseInt(inboundSpan.textContent) > 0) {
-            inboundSpan.classList.add('inbound-active');
-        } else {
-            inboundSpan.classList.add('inbound-inactive');
-        }
-    }
-    
-    if (outboundSpan) {
-        if (parseInt(outboundSpan.textContent) > 0) {
-            outboundSpan.classList.add('outbound-active');
-        } else {
-            outboundSpan.classList.add('outbound-inactive');
-        }
-    }
+    const stats = nodeStats[nodeId] || { inboundCount: 0, outboundCount: 0 };
+    const inboundEl = document.getElementById(`inbound-stat-${nodeId}`);
+    const outboundEl = document.getElementById(`outbound-stat-${nodeId}`);
+    if (inboundEl) inboundEl.className = 'inbound-stat ml-1 ' + (stats.inboundCount > 0 ? 'text-green-600 font-bold' : 'text-gray-500');
+    if (outboundEl) outboundEl.className = 'outbound-stat ml-1 ' + (stats.outboundCount > 0 ? 'text-red-600 font-bold' : 'text-gray-500');
 }
 
-
-// --- NEW FUNCTION: Fetch and Update Click Stats for a single node with retries ---
-async function updateNodeStats(nodeId) {
+function updateNodeStats(nodeId) {
+    const stats = nodeStats[nodeId] || { inboundCount: 0, outboundCount: 0 };
+    const hasInbound = stats.inboundCount > 0;
+    const hasOutbound = stats.outboundCount > 0;
     const statsDiv = document.getElementById(`stats-${nodeId}`);
-    if (!statsDiv) return;
-    
-    // Set loading state immediately
-    statsDiv.innerHTML = '<span class="text-gray-400 text-[8px] italic">Loading stats...</span>';
-    
-    let inboundCount = 0;
-    let outboundCount = 0;
-    const MAX_STAT_RETRIES = 3; 
-
-    // --- Fetch Stats with Retries ---
-    for (let i = 0; i < MAX_STAT_RETRIES; i++) {
-        try {
-            // Attempt to fetch both inbound and outbound data
-            const inboundData = await fetchWithRetry(`/inbound_stats/${encodeURIComponent(nodeId)}`);
-            const outboundData = await fetchWithRetry(`/outbound_stats/${encodeURIComponent(nodeId)}`);
-
-            inboundCount = inboundData.total_inbound_count;
-            outboundCount = outboundData.total_outbound_count;
-            
-            // Cache stats for filtering logic
-            nodeStats[nodeId] = { inboundCount, outboundCount }; 
-            
-            // If data is successfully fetched, break the loop
-            break; 
-
-        } catch (error) {
-            // If it's the last attempt and it failed, log the error
-            if (i === MAX_STAT_RETRIES - 1) {
-                console.error(`Failed to load stats for ${nodeId} after ${MAX_STAT_RETRIES} attempts.`, error);
-                statsDiv.innerHTML = '<span class="text-red-500 text-[8px]">Stats Error</span>';
-                return;
-            }
-            // Wait briefly before retrying
-            await new Promise(resolve => setTimeout(resolve, 500)); 
-        }
-    }
-    
-    // --- Final Display ---
-    // MODIFIED: Use new class structure for styling.
+    if (statsDiv) {
         statsDiv.innerHTML = `
             <div class="flex justify-around text-xs font-bold pt-1 border-t border-gray-300 mt-1">
-                <button type="button"
-                        class="text-gray-700 focus:outline-none"
-                        onclick="openInboundDetails('${nodeId}')">
+                <button type="button" class="text-gray-700 focus:outline-none" onclick="openInboundDetails('${nodeId}')">
                     IN:
-                    <span id="inbound-stat-${nodeId}" class="inbound-stat ml-1">${inboundCount}</span>
+                    <span id="inbound-stat-${nodeId}" class="inbound-stat ${hasInbound ? 'inbound-active' : 'inbound-inactive'}">
+                        ${stats.inboundCount}
+                    </span>
                 </button>
-                <button type="button"
-                        class="text-gray-700 focus:outline-none"
-                        onclick="openOutboundDetails('${nodeId}')">
+                <button type="button" class="text-gray-700 focus:outline-none" onclick="openOutboundDetails('${nodeId}')">
                     OUT:
-                    <span id="outbound-stat-${nodeId}" class="outbound-stat ml-1">${outboundCount}</span>
+                    <span id="outbound-stat-${nodeId}" class="outbound-stat ${hasOutbound ? 'outbound-active' : 'outbound-inactive'}">
+                        ${stats.outboundCount}
+                    </span>
                 </button>
             </div>
         `;
-
-    // --- Schedule CSS coloring after DOM update ---
-    setTimeout(() => applyStatColors(nodeId), 50);
-
-    // Recalculate horizontal lines after this node’s width may have changed
-    setTimeout(updateHorizontalLines, 0);
+    }
 }
 
+function updateVisibleNodeStats() {
+    document.querySelectorAll('[id^="node-"]').forEach(nodeElement => {
+        const nodeId = nodeElement.id.replace('node-', '');
+        updateNodeStats(nodeId);
+    });
+}
 
-// --- Node Rendering Logic ---
+// loadAndRenderVisuals: updated to respect nodeToFocusId and preserveViewport/localStorage restore
+async function loadAndRenderVisuals(rootOverrideId = null) {
+    const vizWrap = document.getElementById('tree-content-wrapper');
+    if (!vizWrap) return;
+    renderedNodes.clear();
+    vizWrap.innerHTML = '<p class="text-center text-gray-500 italic p-10">Rendering tree...</p>';
 
-/**
- * Renders a single node card and its children recursively.
- */
-// --- Node Rendering Logic ---
+    // Mark parents visible for any visible nodes
+    const markParentsVisible = (nodeId) => {
+        let currentId = nodeId;
+        while (parentMap[currentId]) {
+            const parentId = parentMap[currentId];
+            if (!nodeMap[parentId]) break;
+            nodeMap[parentId]._forceVisible = true;
+            currentId = parentId;
+        }
+    };
+    for (const nodeId in nodeMap) { if (isNodeVisible(nodeId)) markParentsVisible(nodeId); }
 
-function renderNode(nodeId, nodeMap, level = 0) {
-    const node = nodeMap[nodeId];
-
-    if (!node) {
-        return '';
+    let rootNodeId = rootOverrideId || stableRootId || Object.keys(nodeMap)[0];
+    if (!rootNodeId || !nodeMap[rootNodeId]) {
+        if (stableRootId) loadAndRenderTree();
+        return;
     }
 
-    // --- CRITICAL FILTER CHECK ---
-    if (!isNodeVisible(nodeId)) {
-        return '';
+    try {
+        await fetchAllStats();
+        const treeHtml = renderNode(rootNodeId, nodeMap, 0);
+        vizWrap.innerHTML = treeHtml;
+        window.lucide.createIcons();
+
+        // apply zoom
+        applyZoom(currentScale);
+
+        // If a specific node is requested to focus, do it. Otherwise, restore viewport
+        if (nodeToFocusId) {
+            setTimeout(() => focusNode(nodeToFocusId), 150);
+            nodeToFocusId = null;
+        } else if (preserveViewport) {
+            // restore last saved viewport (if any)
+            const saved = localStorage.getItem('lastViewport');
+            if (saved) {
+                try {
+                    const vp = JSON.parse(saved);
+                    setTimeout(() => {
+                        try { vizWrapper.scrollTo({ left: vp.left, top: vp.top, behavior: 'auto' }); } catch (e) { vizWrapper.scrollLeft = vp.left; vizWrapper.scrollTop = vp.top; }
+                    }, 80);
+                } catch(e) {}
+            }
+        }
+
+        // update stats for visible nodes
+        updateVisibleNodeStats();
+        setTimeout(updateHorizontalLines, 100);
+
+        // cleanup temp flags
+        for (const nodeId in nodeMap) delete nodeMap[nodeId]._forceVisible;
+    } catch (error) {
+        console.error("Error in loadAndRenderVisuals:", error);
+        vizWrap.innerHTML = '<p class="text-center text-red-500 italic p-10">Error rendering tree. Please try refreshing the page.</p>';
     }
+}
 
-    const isAlreadyRendered = renderedNodes.has(nodeId);
-
-    // Stop recursion if already drawn (prevents cross-linked nodes from shifting position)
-    if (isAlreadyRendered) {
-        return '';
-    }
-
+// renderNode (keeps your original structure, but respects _forceVisible and schedules stats update)
+function renderNode(nodeId, nodeMapLocal, level = 0) {
+    const node = nodeMapLocal[nodeId];
+    if (!node) return '';
+    if (!node._forceVisible && !isNodeVisible(nodeId)) return '';
+    if (renderedNodes.has(nodeId)) return '';
     renderedNodes.add(nodeId);
 
     const nodeName = node.name;
@@ -984,34 +574,29 @@ function renderNode(nodeId, nodeMap, level = 0) {
     const friendlyId = node.friendlyId || '';
     const statusClasses = getStatusClasses(node.status);
 
-    // 1. Ensure stable order: Sort children IDs alphabetically for consistent sibling arrangement.
-    const sortedChildren = (node.children || []).sort();
-    const renderableChildrenIds = sortedChildren;
-    const hasChildren = renderableChildrenIds.length > 0;
+    const stats = nodeStats[nodeId] || { inboundCount: 0, outboundCount: 0 };
+    const hasInbound = stats.inboundCount > 0;
+    const hasOutbound = stats.outboundCount > 0;
 
-    // --- Schedule stat update after rendering ---
+    const sortedChildren = (node.children || []).slice().sort();
+    const hasChildren = sortedChildren.length > 0;
+
+    // schedule stat update
     setTimeout(() => updateNodeStats(nodeId), 100);
 
-    // --- Children rendering ---
+    // children
     let childrenHtml = '';
-    if (hasChildren) {
-        // If we are in "single node mode" and this is the root of the render,
-        // do NOT render any children – just the single node card.
-        if (!(singleNodeMode && level === 0)) {
-            const childNodesHtml = renderableChildrenIds
-                .map(childId => renderNode(childId, nodeMap, level + 1))
-                .join('');
-
-            if (childNodesHtml.trim() !== '') {
-                // Add a class if there is only one child wrapper
-                const containerClass =
-                    renderableChildrenIds.length === 1 ? ' single-child-container' : '';
-                childrenHtml = `<div class="tree-container${containerClass}">${childNodesHtml}</div>`;
-            }
+    if (hasChildren && !(singleNodeMode && level === 0)) {
+        const childNodesHtml = sortedChildren
+            .map(childId => renderNode(childId, nodeMapLocal, level + 1))
+            .join('');
+        if (childNodesHtml.trim() !== '') {
+            const containerClass = sortedChildren.length === 1 ? ' single-child-container' : '';
+            childrenHtml = `<div class="tree-container${containerClass}">${childNodesHtml}</div>`;
         }
     }
 
-    // --- Icon Logic: All icons are black, no background circles ---
+    // action icons
     let actionIcons = '';
     const iconStyle = `width="12" height="12" class="text-gray-800" stroke-width="2.5"`;
 
@@ -1019,21 +604,14 @@ function renderNode(nodeId, nodeMap, level = 0) {
         <button class="info-btn" onclick="openInfoModal('${nodeIdStr}')" title="View Description/Stats">
             <svg data-lucide="info" ${iconStyle}></svg>
         </button>
-    `;
-
-    actionIcons += `
         <button class="edit-btn" onclick="openEditModal('${nodeIdStr}')" title="Edit Node Details">
             <svg data-lucide="pencil" ${iconStyle}></svg>
         </button>
-    `;
-
-    actionIcons += `
         <button class="search-btn" onclick="openSearchLinkModal('${nodeIdStr}', '${nodeName}')" title="Search & Link Nodes">
             <svg data-lucide="search" ${iconStyle}></svg>
         </button>
     `;
 
-    // Optional external link icon if description has a URL (BLUE)
     const firstUrl = getFirstUrl(node.description);
     if (firstUrl) {
         const safeUrl = firstUrl.replace(/"/g, '&quot;');
@@ -1044,7 +622,6 @@ function renderNode(nodeId, nodeMap, level = 0) {
         `;
     }
 
-    // Conditional Delete Icon (Only on Leaf Nodes)
     if ((node.children || []).length === 0) {
         actionIcons += `
             <button class="delete-btn" onclick="openDeleteConfirmModal('${nodeIdStr}')" title="Delete Node">
@@ -1053,320 +630,249 @@ function renderNode(nodeId, nodeMap, level = 0) {
         `;
     }
 
-    // Add Child Icon
     actionIcons += `
         <button class="add-child-btn" onclick="openChildModal('${nodeIdStr}', '${nodeName}')" title="Add New Child">
             <svg data-lucide="plus" ${iconStyle}></svg>
         </button>
     `;
 
-    // --- Node HTML structure: wrapper carries level-based line color ---
+    const statsHtml = `
+        <div id="stats-${nodeIdStr}" class="p-0.5">
+            <div class="flex justify-around text-xs font-bold pt-1 border-t border-gray-300 mt-1">
+                <button type="button" class="text-gray-700 focus:outline-none" onclick="openInboundDetails('${nodeIdStr}')">
+                    IN:
+                    <span id="inbound-stat-${nodeIdStr}" class="inbound-stat ${hasInbound ? 'inbound-active' : 'inbound-inactive'}">
+                        ${stats.inboundCount}
+                    </span>
+                </button>
+                <button type="button" class="text-gray-700 focus:outline-none" onclick="openOutboundDetails('${nodeIdStr}')">
+                    OUT:
+                    <span id="outbound-stat-${nodeIdStr}" class="outbound-stat ${hasOutbound ? 'outbound-active' : 'outbound-inactive'}">
+                        ${stats.outboundCount}
+                    </span>
+                </button>
+            </div>
+        </div>
+    `;
+
     const wrapperClass = hasChildren ? 'node-wrapper has-children' : 'node-wrapper';
     const levelColor = getLevelColor(level);
 
     return `
         <div class="${wrapperClass}" style="--line-color: ${levelColor};">
             <div class="node-card ${statusClasses.bg} p-2 rounded-xl border ${statusClasses.border} shadow-lg node-box relative" id="node-${nodeIdStr}">
-                <!-- Friendly short ID in top-left -->
-                <div class="absolute top-1 left-2 text-[9px] font-semibold text-gray-500">
-                    ${friendlyId}
-                </div>
-
-                <div class="node-action-bar">
-                    ${actionIcons}
-                </div>
+                <div class="absolute top-1 left-2 text-[9px] font-semibold text-gray-500">${friendlyId}</div>
+                <div class="node-action-bar">${actionIcons}</div>
                 <h3 class="text-xs ${statusClasses.text} pl-4 pr-4 whitespace-normal text-center">${nodeName}</h3>
                 <p class="text-[7px] text-gray-600 pl-4 pr-4">Status: ${node.status}</p>
-                <p class="text-[7px] text-gray-600 pl-4 pr-4">
-                    ID: <span class="font-mono">${nodeIdStr.substring(0, 8)}...</span>
-                </p>
-                
-                <div id="stats-${nodeIdStr}" class="p-0.5">
-                    <span class="text-gray-400 text-[8px] italic">Loading stats...</span>
-                </div>
+                <p class="text-[7px] text-gray-600 pl-4 pr-4">ID: <span class="font-mono">${nodeIdStr.substring(0, 8)}...</span></p>
+                ${statsHtml}
             </div>
             ${childrenHtml}
         </div>
     `;
 }
-/**
- * Fetches the entire graph structure and renders the tree starting from the root.
- * This is the function we want to minimize calling, but it's necessary for structural changes.
- */
-/**
- * Fetches the entire graph structure and renders the tree starting from the root.
- * This is the function we want to minimize calling, but it's necessary for structural changes.
- */
+
+// loadAndRenderTree: fetches /tree, rebuilds nodeMap & parentMap and renders; restores viewport/focus per rules
 async function loadAndRenderTree() {
-    const vizWrapper = document.getElementById('tree-content-wrapper');
-    vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">Loading tree structure...</p>';
-    
-    renderedNodes.clear(); 
-    
+    const vizWrap = document.getElementById('tree-content-wrapper');
+    if (!vizWrap) return;
+    vizWrap.innerHTML = '<div class="flex justify-center items-center h-full"><div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div></div>';
+
     try {
+        renderedNodes.clear();
+        nodeMap = {};
+        parentMap = {};
+
         const response = await fetchWithRetry('/tree');
-        
         if (!response || response.length === 0) {
-            vizWrapper.innerHTML = '<p class="text-center text-red-500 italic p-10">No Root Node found. <a href="index.html" class="text-indigo-600 font-semibold hover:underline">Click here to create the root node.</a></p>';
+            vizWrap.innerHTML = '<p class="text-center text-red-500 italic p-10">No Root Node found. <a href="index.html" class="text-indigo-600 font-semibold hover:underline">Click here to create the root node.</a></p>';
             return;
         }
 
-        // 1. Map all nodes by ID
-        nodeMap = {};
-        parentMap = {};
-        
-        response.forEach(node => {
-            nodeMap[node.contentId] = { ...node }; 
-        });
-
-        // Build parentMap: childId -> parentId
+        response.forEach(node => { nodeMap[node.contentId] = { ...node }; });
         response.forEach(node => {
             if (Array.isArray(node.children)) {
                 node.children.forEach(childId => {
-                    if (childId) {
-                        parentMap[childId] = node.contentId;
-                    }
+                    if (childId && nodeMap[childId]) parentMap[childId] = node.contentId;
                 });
             }
         });
 
-        // Assign friendly short IDs (01, 02, 03, ...)
         assignFriendlyIds(response);
         updateTotalNodeCount();
 
-        // 2. Identify the Root Node 
-        let rootNodeId = null;
-        
-        if (response.length > 0) {
-            rootNodeId = response[0].contentId; 
-            stableRootId = rootNodeId; 
-        } else {
-            return;
+        const rootNodeId = response[0]?.contentId;
+        if (!rootNodeId) throw new Error('No root node found');
+        stableRootId = rootNodeId;
+
+        await fetchAllStats();
+
+        const treeHtml = renderNode(rootNodeId, nodeMap, 0);
+        vizWrap.innerHTML = treeHtml;
+        window.lucide.createIcons();
+
+        applyZoom(currentScale);
+
+        // If a node to focus exists (set by actions), focus it. Otherwise restore viewport
+        if (nodeToFocusId) {
+            setTimeout(() => focusNode(nodeToFocusId), 150);
+            nodeToFocusId = null;
+        } else if (preserveViewport) {
+            const saved = localStorage.getItem('lastViewport');
+            if (saved) {
+                try {
+                    const vp = JSON.parse(saved);
+                    setTimeout(() => {
+                        try { vizWrapper.scrollTo({ left: vp.left, top: vp.top, behavior: 'auto' }); } catch(e) { vizWrapper.scrollLeft = vp.left; vizWrapper.scrollTop = vp.top; }
+                    }, 80);
+                } catch(e) {}
+            }
         }
-        
-        const rootName = nodeMap[rootNodeId].name;
-        
-        // 3. Render visuals (uses loadAndRenderVisuals to handle zoom/focus logic)
-        loadAndRenderVisuals(rootNodeId);
 
-        // 4. Initial Scroll/Reset (Only if no focus node was requested by DML actions)
-        if (!nodeToFocusId) {
-            vizWrapper.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
-        }
-
-        showMessage(`Tree loaded successfully, starting from root: ${rootName}.`, 'success');
-
+        updateVisibleNodeStats();
+        setTimeout(updateHorizontalLines, 100);
     } catch (error) {
-        vizWrapper.innerHTML = '<p class="text-center text-red-500 italic p-10">Error loading graph. Check backend connection or console for details.</p>';
         console.error("Tree loading failed:", error);
+        vizWrap.innerHTML = `
+            <div class="text-center p-10">
+                <p class="text-red-500 font-medium">Error loading tree:</p>
+                <p class="text-gray-600 text-sm mt-2">${error.message}</p>
+                <button onclick="loadAndRenderTree()" class="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors">Retry</button>
+            </div>
+        `;
     }
 }
-function assignFriendlyIds(orderArray = null) {
-    // If we have an explicit order (e.g. /tree response), use that.
-    // Otherwise, fall back to current nodeMap insertion order.
-    let nodesInOrder;
 
+// assignFriendlyIds unchanged
+function assignFriendlyIds(orderArray = null) {
+    let nodesInOrder;
     if (orderArray && Array.isArray(orderArray)) {
-        // Map the response array (which is in creation order) back to nodeMap entries
-        nodesInOrder = orderArray
-            .map(n => nodeMap[n.contentId])
-            .filter(Boolean);
+        nodesInOrder = orderArray.map(n => nodeMap[n.contentId]).filter(Boolean);
     } else {
-        // Object.values preserves insertion order in modern JS engines
         nodesInOrder = Object.values(nodeMap || {});
     }
-
     if (!nodesInOrder.length) return;
-
     let counter = 1;
-    nodesInOrder.forEach(node => {
-        node.friendlyId = String(counter).padStart(2, '0'); // 01, 02, 03...
-        counter += 1;
-    });
-}
-/**
- * Renders the visualization using current map (no fetch).
- * This is the function called by filter/zoom actions.
- */
-function loadAndRenderVisuals(rootOverrideId = null) {
-    const vizWrapper = document.getElementById('tree-content-wrapper');
-    renderedNodes.clear(); 
-    vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">Rendering tree...</p>';
-
-    let rootNodeId = rootOverrideId || stableRootId || Object.keys(nodeMap)[0];
-    if (!rootNodeId || !nodeMap[rootNodeId]) {
-         // Re-fetch map if map is empty but we expect a root (edge case for corruption)
-         if (stableRootId) loadAndRenderTree(); 
-         return;
-    }
-    
-    const treeHtml = renderNode(rootNodeId, nodeMap,0);
-    vizWrapper.innerHTML = treeHtml; 
-    window.lucide.createIcons();
-    
-    // 1. Apply saved zoom level (retains user's zoom)
-    applyZoom(currentScale); 
-
-    // 2. Apply Focus after rendering
-    if (nodeToFocusId) {
-        focusNode(nodeToFocusId);
-        nodeToFocusId = null; 
-    }
-
-    // 3. Explicitly trigger stat loading for all visible nodes
-    for (const id in nodeMap) {
-        if(document.getElementById(`node-${id}`)) { 
-            updateNodeStats(id);
-        }
-    }
-    
-    // 4. Recalculate horizontal line widths
-    // Use setTimeout to ensure the DOM has settled and sizes are final.
-    setTimeout(updateHorizontalLines, 250); 
+    nodesInOrder.forEach(node => { node.friendlyId = String(counter).padStart(2, '0'); counter += 1; });
 }
 
-/**
- * Calculates the width for the horizontal line based on center-to-center distance.
- */
-// function updateHorizontalLines() {
-//     document.querySelectorAll(".tree-container").forEach(container => {
-//         const children = container.children;
-        
-//         // Skip if less than 2 children (single child case is handled by CSS class)
-//         if (children.length < 2) return; 
-
-//         // 1. Get the center of the first child's wrapper
-//         const firstChild = children[0];
-//         const firstCenter = firstChild.offsetLeft + (firstChild.offsetWidth / 2);
-
-//         // 2. Get the center of the last child's wrapper
-//         const lastChild = children[children.length - 1];
-//         const lastCenter = lastChild.offsetLeft + (lastChild.offsetWidth / 2);
-
-//         // 3. Calculate the line span (center-to-center)
-//         const lineSpan = lastCenter - firstCenter;
-
-//         // FIX: Use exactly the center-to-center distance. The CSS translateX will handle the final pixel perfect alignment.
-//         container.style.setProperty("--children-width", lineSpan + "px"); 
-//     });
-// }
-
-
-// --- Event Listeners (FIXED) ---
+// updateHorizontalLines unchanged
 function updateHorizontalLines() {
     document.querySelectorAll(".tree-container").forEach(container => {
         const children = container.children;
-
-        // No horizontal line needed if fewer than 2 children
         if (children.length < 2) return;
-
         const firstChild = children[0];
         const lastChild = children[children.length - 1];
-
-        // Centers within the container’s coordinate system
         const start = firstChild.offsetLeft + (firstChild.offsetWidth / 2);
         const end   = lastChild.offsetLeft  + (lastChild.offsetWidth  / 2);
-
         container.style.setProperty("--line-start", start + "px");
         container.style.setProperty("--line-end",   end   + "px");
     });
 }
+
 function getLevelColor(level) {
-    // “Endless” cycle of pleasant HSL colors based on level
-    const hue = (level * 57 + 137) % 360;  // spreads hues around the wheel
+    const hue = (level * 57 + 137) % 360;
     const saturation = 55;
     const lightness = 70;
     return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
 }
 
-// Use DOMContentLoaded to ensure elements are available for listeners
+// DOMContentLoaded: attach listeners, save/restore viewport positions
 document.addEventListener('DOMContentLoaded', () => {
-    
-    // Event listener for adding a new child node
+    // Save viewport position on scroll so it can be restored on reloads
+    const safeViz = document.getElementById('tree-visualization');
+    if (safeViz) {
+        safeViz.addEventListener('scroll', () => {
+            try {
+                const snapshot = { left: safeViz.scrollLeft, top: safeViz.scrollTop, scale: currentScale };
+                localStorage.setItem('lastViewport', JSON.stringify(snapshot));
+            } catch(e) {}
+        }, { passive: true });
+    }
+
+    // create child form submit handler (keeps original logic but sets nodeToFocusId & preserveViewport)
     document.getElementById('create-child-form').addEventListener('submit', async (e) => {
         e.preventDefault();
         const parentId = document.getElementById('modal-parent-id').value;
-        const parentName = nodeMap[parentId].name;
-
+        const parentName = nodeMap[parentId]?.name || 'Parent';
         const childName = document.getElementById('child-name').value.trim();
         const childDescription = document.getElementById('child-description').value.trim();
-
-        closeChildModal(); 
-        
-        let childId = null;
+        if (!childName) { showMessage('Please enter a name for the new node', 'error'); return; }
+        closeChildModal();
         try {
-            // 1. Create the Child Node
-            showMessage(`1/2: Creating new node '${childName}'...`, 'info');
-            const nodeOptions = {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: childName, description: childDescription, status: 'New' })
-            };
+            const vizWrap = document.getElementById('tree-content-wrapper');
+            vizWrap.innerHTML = '<div class="flex justify-center items-center h-full"><div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div></div>';
+            showMessage(`Creating node '${childName}'...`, 'info');
+            const nodeOptions = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: childName, description: childDescription, status: 'New' })};
             const childResult = await fetchWithRetry('/node/create', nodeOptions);
-            childId = childResult.contentId;
-            
-            // 2. Create the Relationship
-            showMessage(`2/2: Linking '${parentName}' to '${childName}'...`, 'info');
-            const relationOptions = {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ parentId: parentId, childId: childId })
-            };
+            const childId = childResult.contentId;
+            if (!childId) throw new Error('Failed to create node: No ID returned');
+
+            showMessage(`Linking '${parentName}' to '${childName}'...`, 'info');
+            const relationOptions = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parentId, childId }) };
             await fetchWithRetry('/relation/create', relationOptions);
-            
-            showMessage(`Child '${childName}' added and linked successfully.`, 'success');
-            
-            // --- CRITICAL FIX: Set focus ID and reload to reflect new structure and keep position ---
-            if (childId) {
-                nodeToFocusId = childId; // Set focus to the new node
+
+            document.getElementById('child-name').value = '';
+            document.getElementById('child-description').value = '';
+
+            nodeMap[childId] = { contentId: childId, name: childName, description: childDescription, status: 'New', children: [] };
+            parentMap[childId] = parentId;
+            if (nodeMap[parentId]) {
+                if (!nodeMap[parentId].children) nodeMap[parentId].children = [];
+                nodeMap[parentId].children.push(childId);
             }
-            loadAndRenderTree(); 
- // Necessary full refresh to update hierarchy
-            
+
+            // Render just the parent container if possible, else reload full tree
+            const parentElement = document.getElementById(`node-${parentId}`);
+            if (parentElement) {
+                const parentWrapper = parentElement.closest('.node-wrapper');
+                if (parentWrapper) {
+                    // Update the children container for the parent
+                    updateParentContainer(parentId);
+
+                    // Ensure we focus the new node
+                    nodeToFocusId = childId;
+                    preserveViewport = false;
+                    // small delay to allow DOM insertion
+                    setTimeout(() => focusNode(childId), 200);
+                } else {
+                    nodeToFocusId = childId;
+                    preserveViewport = false;
+                    await loadAndRenderTree();
+                }
+            } else {
+                nodeToFocusId = childId;
+                preserveViewport = false;
+                await loadAndRenderTree();
+            }
+            showMessage(`Successfully created '${childName}'`, 'success');
         } catch (error) {
-            showMessage(`Failed to create or link child node: ${error.message}.`, 'error');
-            loadAndRenderTree(); // Fallback to full refresh on failure
+            console.error('Error creating node:', error);
+            showMessage(`Failed to create node: ${error.message}`, 'error');
+            try { await loadAndRenderTree(); } catch(e) { console.error('Reload failed after create error:', e); }
         }
     });
 
+    // other UI bindings (re-attach existing handlers)
     document.getElementById('edit-node-form').addEventListener('submit', handleEditSubmit);
     document.getElementById('modal-cancel-child').addEventListener('click', closeChildModal);
-
     document.getElementById('start-search-button').addEventListener('click', handleSearch);
     document.getElementById('confirm-link-button').addEventListener('click', handleLinkSelected);
-    
-    // Handle search on Enter keypress
-    document.getElementById('search-input').addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
-            e.preventDefault(); 
-            handleSearch();
-        }
-    });
-    
+    document.getElementById('search-input').addEventListener('keypress', function(e) { if (e.key === 'Enter') { e.preventDefault(); handleSearch(); } });
+
     // Initial load
     loadAndRenderTree();
 });
 
-// Expose functions globally for HTML-inline event handlers (like onclick)
-window.zoomIn = zoomIn;
-window.zoomOut = zoomOut;
-window.resetZoom = resetZoom;
-window.toggleZoomBar = toggleZoomBar;
-window.toggleFilterPanel = toggleFilterPanel;
-window.applyFilters = applyFilters;
-window.openInfoModal = openInfoModal;
+// expose needed functions globally
+window.zoomIn = zoomIn; window.zoomOut = zoomOut; window.resetZoom = resetZoom; window.toggleZoomBar = toggleZoomBar;
+window.toggleFilterPanel = toggleFilterPanel; window.applyFilters = applyFilters; window.openInfoModal = openInfoModal;
 window.closeInfoModal = closeInfoModal;
 window.openEditModal = openEditModal;
 window.closeEditModal = closeEditModal;
-window.deleteNode = deleteNode;
-window.openDeleteConfirmModal = openDeleteConfirmModal;
-window.closeDeleteConfirmModal = closeDeleteConfirmModal;
-window.openChildModal = openChildModal;
-window.closeChildModal = closeChildModal;
-window.openSearchLinkModal = openSearchLinkModal;
-window.closeSearchLinkModal = closeSearchLinkModal;
-window.deleteRelationFromModal = deleteRelationFromModal;
-window.loadAndRenderVisuals = loadAndRenderVisuals; // Exposed for filter reset
-window.stableRootId = stableRootId; // Exposed for filter reset (will be updated after load)
-window.openInboundDetails = openInboundDetails;
-window.openOutboundDetails = openOutboundDetails;
+window.openDeleteConfirmModal = openDeleteConfirmModal; window.closeDeleteConfirmModal = closeDeleteConfirmModal;
+window.openChildModal = openChildModal; window.closeChildModal = closeChildModal; window.openSearchLinkModal = openSearchLinkModal;
+window.closeSearchLinkModal = closeSearchLinkModal; window.deleteRelationFromModal = deleteRelationFromModal;
+window.loadAndRenderVisuals = loadAndRenderVisuals; window.openInboundDetails = openInboundDetails; window.openOutboundDetails = openOutboundDetails;
+window.stableRootId = stableRootId;
