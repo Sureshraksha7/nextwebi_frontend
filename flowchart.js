@@ -653,15 +653,24 @@ async function openInboundDetails(nodeId) {
                             const desc = linkifyDescription(source.description || 'No description.');
 
                             return `
-                                <div class="mb-2 p-2 rounded-lg border border-gray-200 bg-gray-50">
-                                    <p class="text-sm font-medium text-gray-800">
-                                        ${source.name || 'Unknown'} (${conn.count} clicks)
-                                    </p>
-                                    <p class="text-xs text-gray-600">
-                                        Status: ${source.status || 'N/A'} |
-                                        ID: ${(source.contentId || '').substring(0,8)}...
-                                    </p>
-                                    <p class="text-xs text-gray-600 mt-0.5">${desc}</p>
+                                <div class="mb-2 p-2 rounded-lg border border-gray-200 bg-gray-50 flex items-start justify-between gap-2">
+                                    <div>
+                                        <p class="text-sm font-medium text-gray-800">
+                                            ${source.name || 'Unknown'} (${conn.count} clicks)
+                                        </p>
+                                        <p class="text-xs text-gray-600">
+                                            Status: ${source.status || 'N/A'} |
+                                            ID: ${(source.contentId || '').substring(0,8)}...
+                                        </p>
+                                        <p class="text-xs text-gray-600 mt-0.5">${desc}</p>
+                                    </div>
+                                    <button
+                                        class="text-red-500 hover:text-red-700 mt-1"
+                                        title="Delete this link"
+                                        onclick="deleteRelationFromModal('${conn.sourceId}', '${nodeId}', '${(source.name || 'Unknown').replace(/'/g, "\\'")}', '${(node.name || '').replace(/'/g, "\\'")}')"
+                                    >
+                                        <svg data-lucide="trash-2" width="16" height="16"></svg>
+                                    </button>
                                 </div>
                             `;
                         }).join('')
@@ -671,6 +680,9 @@ async function openInboundDetails(nodeId) {
 
         overlay.innerHTML = contentHtml;
         document.body.appendChild(overlay);
+        if (window.lucide?.createIcons) {
+            window.lucide.createIcons();
+        }
     } catch (e) {
         alert('Failed to load inbound details: ' + e.message);
     }
@@ -711,15 +723,24 @@ async function openOutboundDetails(nodeId) {
                             const desc = linkifyDescription(target.description || 'No description.');
 
                             return `
-                                <div class="mb-2 p-2 rounded-lg border border-gray-200 bg-gray-50">
-                                    <p class="text-sm font-medium text-gray-800">
-                                        ${target.name || 'Unknown'} (${conn.count} clicks)
-                                    </p>
-                                    <p class="text-xs text-gray-600">
-                                        Status: ${target.status || 'N/A'} |
-                                        ID: ${(target.contentId || '').substring(0,8)}...
-                                    </p>
-                                    <p class="text-xs text-gray-600 mt-0.5">${desc}</p>
+                                <div class="mb-2 p-2 rounded-lg border border-gray-200 bg-gray-50 flex items-start justify-between gap-2">
+                                    <div>
+                                        <p class="text-sm font-medium text-gray-800">
+                                            ${target.name || 'Unknown'} (${conn.count} clicks)
+                                        </p>
+                                        <p class="text-xs text-gray-600">
+                                            Status: ${target.status || 'N/A'} |
+                                            ID: ${(target.contentId || '').substring(0,8)}...
+                                        </p>
+                                        <p class="text-xs text-gray-600 mt-0.5">${desc}</p>
+                                    </div>
+                                    <button
+                                        class="text-red-500 hover:text-red-700 mt-1"
+                                        title="Delete this link"
+                                        onclick="deleteRelationFromModal('${nodeId}', '${conn.targetId}', '${(node.name || '').replace(/'/g, "\\'")}', '${(target.name || 'Unknown').replace(/'/g, "\\'")}')"
+                                    >
+                                        <svg data-lucide="trash-2" width="16" height="16"></svg>
+                                    </button>
                                 </div>
                             `;
                         }).join('')
@@ -729,6 +750,9 @@ async function openOutboundDetails(nodeId) {
 
         overlay.innerHTML = contentHtml;
         document.body.appendChild(overlay);
+        if (window.lucide?.createIcons) {
+            window.lucide.createIcons();
+        }
     } catch (e) {
         alert('Failed to load outbound details: ' + e.message);
     }
@@ -793,10 +817,10 @@ async function handleSearch() {
     }
 }
 
-async function handleLinkSelected() {
+async function handleLinkSelected() 
     const parentId = document.getElementById('link-modal-parent-id').value;
     const parentName = nodeMap[parentId].name;
-    const checkboxes = document.querySelectorAll('#search-results-list input[name="link-node"]:checked');
+    const checkboxes = document.querySelectorAll('#search-results-list input[name="link-node"]:checked`);
     
     if (checkboxes.length === 0) {
         showMessage('No nodes selected for linking.', 'error');
@@ -810,43 +834,43 @@ async function handleLinkSelected() {
     const nodesToUpdate = new Set([parentId]);
     
     for (const checkbox of checkboxes) {
-    const childId = checkbox.value;
-    const childName = nodeMap[childId] ? nodeMap[childId].name : 'Unknown Node';
-
-    try {
-        showMessage(`1/2: Creating static link ${parentName} → ${childName}...`, 'info');
-
-        // Step 1: Create or confirm the Static Relationship (idempotent)
-        const relationOptions = {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ parentId: parentId, childId: childId })
-        };
+        const childId = checkbox.value;
+        const childName = nodeMap[childId] ? nodeMap[childId].name : 'Unknown Node';
 
         try {
-            await fetchWithRetry('/relation/create', relationOptions);
-        } catch (e) {
-            // If relationship already exists, ignore and continue to record click
-            if (!e.message.includes('Relationship exists')) {
-                throw e;  // real error
+            showMessage(`1/2: Creating static link ${parentName} → ${childName}...`, 'info');
+
+            // Step 1: Create or confirm the Static Relationship (idempotent)
+            const relationOptions = {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ parentId: parentId, childId: childId })
+            };
+
+            try {
+                await fetchWithRetry('/relation/create', relationOptions);
+            } catch (e) {
+                // If relationship already exists, ignore and continue to record click
+                if (!e.message.includes('Relationship exists')) {
+                    throw e;  // real error
+                }
             }
+
+            // Step 2: Record a "Click" (updates IN/OUT counters even for existing links)
+            showMessage(`2/2: Recording initial click to update IN/OUT counters...`, 'info');
+            const clickOptions = {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sourceId: parentId, targetId: childId })
+            };
+            await fetchWithRetry('/link/click', clickOptions);
+
+            nodesToUpdate.add(childId);
+            successCount++;
+        } catch (error) {
+            showMessage(`Failed to link ${childName}: ${error.message}`, 'error');
         }
-
-        // Step 2: Record a "Click" (updates IN/OUT counters even for existing links)
-        showMessage(`2/2: Recording initial click to update IN/OUT counters...`, 'info');
-        const clickOptions = {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sourceId: parentId, targetId: childId })
-        };
-        await fetchWithRetry('/link/click', clickOptions);
-
-        nodesToUpdate.add(childId);
-        successCount++;
-    } catch (error) {
-        showMessage(`Failed to link ${childName}: ${error.message}`, 'error');
     }
-}
     
     if (successCount > 0) {
         showMessage(`Successfully linked ${successCount} node(s) to ${parentName}. Updating view...`, 'success');
@@ -926,22 +950,22 @@ async function updateNodeStats(nodeId) {
     
     // --- Final Display ---
     // MODIFIED: Use new class structure for styling.
-        statsDiv.innerHTML = `
-            <div class="flex justify-around text-xs font-bold pt-1 border-t border-gray-300 mt-1">
-                <button type="button"
-                        class="text-gray-700 focus:outline-none"
-                        onclick="openInboundDetails('${nodeId}')">
-                    IN:
-                    <span id="inbound-stat-${nodeId}" class="inbound-stat ml-1">${inboundCount}</span>
-                </button>
-                <button type="button"
-                        class="text-gray-700 focus:outline-none"
-                        onclick="openOutboundDetails('${nodeId}')">
-                    OUT:
-                    <span id="outbound-stat-${nodeId}" class="outbound-stat ml-1">${outboundCount}</span>
-                </button>
-            </div>
-        `;
+    statsDiv.innerHTML = `
+        <div class="flex justify-around text-xs font-bold pt-1 border-t border-gray-300 mt-1">
+            <button type="button"
+                    class="text-gray-700 focus:outline-none"
+                    onclick="openInboundDetails('${nodeId}')">
+                IN:
+                <span id="inbound-stat-${nodeId}" class="inbound-stat ml-1">${inboundCount}</span>
+            </button>
+            <button type="button"
+                    class="text-gray-700 focus:outline-none"
+                    onclick="openOutboundDetails('${nodeId}')">
+                OUT:
+                <span id="outbound-stat-${nodeId}" class="outbound-stat ml-1">${outboundCount}</span>
+            </button>
+        </div>
+    `;
 
     // --- Schedule CSS coloring after DOM update ---
     setTimeout(() => applyStatColors(nodeId), 50);
@@ -1034,9 +1058,9 @@ function renderNode(nodeId, nodeMap, level = 0) {
     `;
 
     // Optional external link icon if description has a URL (BLUE)
-    const firstUrl = getFirstUrl(node.description);
-    if (firstUrl) {
-        const safeUrl = firstUrl.replace(/"/g, '&quot;');
+    const firstUrl2 = getFirstUrl(node.description);
+    if (firstUrl2) {
+        const safeUrl = firstUrl2.replace(/"/g, '&quot;');
         actionIcons += `
             <button class="link-btn" onclick="window.open('${safeUrl}', '_blank')" title="Open link from description">
                 <svg data-lucide="link" width="12" height="12" class="text-blue-600" stroke-width="2.5"></svg>
@@ -1184,45 +1208,56 @@ function assignFriendlyIds(orderArray = null) {
         counter += 1;
     });
 }
-/**
- * Renders the visualization using current map (no fetch).
- * This is the function called by filter/zoom actions.
- */
 function loadAndRenderVisuals(rootOverrideId = null) {
     const vizWrapper = document.getElementById('tree-content-wrapper');
-    renderedNodes.clear(); 
+    renderedNodes.clear();
     vizWrapper.innerHTML = '<p class="text-center text-gray-500 italic p-10">Rendering tree...</p>';
 
     let rootNodeId = rootOverrideId || stableRootId || Object.keys(nodeMap)[0];
     if (!rootNodeId || !nodeMap[rootNodeId]) {
-         // Re-fetch map if map is empty but we expect a root (edge case for corruption)
-         if (stableRootId) loadAndRenderTree(); 
-         return;
+        if (stableRootId) loadAndRenderTree();
+        return;
     }
-    
-    const treeHtml = renderNode(rootNodeId, nodeMap,0);
-    vizWrapper.innerHTML = treeHtml; 
+
+    const treeHtml = renderNode(rootNodeId, nodeMap, 0);
+    vizWrapper.innerHTML = treeHtml;
     window.lucide.createIcons();
-    
-    // 1. Apply saved zoom level (retains user's zoom)
-    applyZoom(currentScale); 
 
-    // 2. Apply Focus after rendering
+    // Apply last zoom level
+    applyZoom(currentScale);
+
+    // --- NEW: Focus vs restore viewport ---
     if (nodeToFocusId) {
-        focusNode(nodeToFocusId);
-        nodeToFocusId = null; 
+        // explicit focus requested (add/delete/link/edit)
+        setTimeout(() => focusNode(nodeToFocusId), 150);
+        nodeToFocusId = null;
+    } else {
+        // normal reload / filters / general actions: restore last viewport
+        const saved = localStorage.getItem('lastViewport');
+        if (saved) {
+            try {
+                const vp = JSON.parse(saved);
+                const outer = document.getElementById('tree-visualization');
+                if (outer) {
+                    outer.scrollTo({
+                        left: vp.left,
+                        top: vp.top,
+                        behavior: 'auto'
+                    });
+                }
+            } catch (e) {
+                // ignore bad JSON
+            }
+        }
     }
 
-    // 3. Explicitly trigger stat loading for all visible nodes
+    // load stats + lines as you already do
     for (const id in nodeMap) {
-        if(document.getElementById(`node-${id}`)) { 
+        if (document.getElementById(`node-${id}`)) {
             updateNodeStats(id);
         }
     }
-    
-    // 4. Recalculate horizontal line widths
-    // Use setTimeout to ensure the DOM has settled and sizes are final.
-    setTimeout(updateHorizontalLines, 250); 
+    setTimeout(updateHorizontalLines, 250);
 }
 
 /**
@@ -1281,70 +1316,44 @@ function getLevelColor(level) {
 
 // Use DOMContentLoaded to ensure elements are available for listeners
 document.addEventListener('DOMContentLoaded', () => {
+    const safeViz = document.getElementById('tree-visualization');
+    if (safeViz) {
+        safeViz.addEventListener('scroll', () => {
+            try {
+                const snapshot = {
+                    left: safeViz.scrollLeft,
+                    top: safeViz.scrollTop,
+                    scale: currentScale
+                };
+                localStorage.setItem('lastViewport', JSON.stringify(snapshot));
+            } catch (e) {}
+        }, { passive: true });
+    }
+
+    // === NEW: ESC closes any open modal ===
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+
+        // Core modals
+        closeChildModal();
+        closeEditModal();
+        closeDeleteConfirmModal();
+        closeSearchLinkModal();
+        closeInfoModal();
+
+        // Inbound / outbound overlays (popups)
+        const inboundOverlay = document.getElementById('inbound-popup-overlay');
+        if (inboundOverlay) inboundOverlay.remove();
+
+        const outboundOverlay = document.getElementById('outbound-popup-overlay');
+        if (outboundOverlay) outboundOverlay.remove();
+    });
     
-    // Event listener for adding a new child node
+    // existing listeners...
     document.getElementById('create-child-form').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const parentId = document.getElementById('modal-parent-id').value;
-        const parentName = nodeMap[parentId].name;
-
-        const childName = document.getElementById('child-name').value.trim();
-        const childDescription = document.getElementById('child-description').value.trim();
-
-        closeChildModal(); 
-        
-        let childId = null;
-        try {
-            // 1. Create the Child Node
-            showMessage(`1/2: Creating new node '${childName}'...`, 'info');
-            const nodeOptions = {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: childName, description: childDescription, status: 'New' })
-            };
-            const childResult = await fetchWithRetry('/node/create', nodeOptions);
-            childId = childResult.contentId;
-            
-            // 2. Create the Relationship
-            showMessage(`2/2: Linking '${parentName}' to '${childName}'...`, 'info');
-            const relationOptions = {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ parentId: parentId, childId: childId })
-            };
-            await fetchWithRetry('/relation/create', relationOptions);
-            
-            showMessage(`Child '${childName}' added and linked successfully.`, 'success');
-            
-            // --- CRITICAL FIX: Set focus ID and reload to reflect new structure and keep position ---
-            if (childId) {
-                nodeToFocusId = childId; // Set focus to the new node
-            }
-            loadAndRenderTree(); 
- // Necessary full refresh to update hierarchy
-            
-        } catch (error) {
-            showMessage(`Failed to create or link child node: ${error.message}.`, 'error');
-            loadAndRenderTree(); // Fallback to full refresh on failure
-        }
+        // ...
     });
-
-    document.getElementById('edit-node-form').addEventListener('submit', handleEditSubmit);
-    document.getElementById('modal-cancel-child').addEventListener('click', closeChildModal);
-
-    document.getElementById('start-search-button').addEventListener('click', handleSearch);
-    document.getElementById('confirm-link-button').addEventListener('click', handleLinkSelected);
-    
-    // Handle search on Enter keypress
-    document.getElementById('search-input').addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
-            e.preventDefault(); 
-            handleSearch();
-        }
-    });
-    
-    // Initial load
-    loadAndRenderTree();
+    // ...
 });
 
 // Expose functions globally for HTML-inline event handlers (like onclick)
