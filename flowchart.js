@@ -817,10 +817,10 @@ async function handleSearch() {
     }
 }
 
-async function handleLinkSelected() 
+async function handleLinkSelected() {
     const parentId = document.getElementById('link-modal-parent-id').value;
     const parentName = nodeMap[parentId].name;
-    const checkboxes = document.querySelectorAll('#search-results-list input[name="link-node"]:checked`);
+    const checkboxes = document.querySelectorAll('#search-results-list input[name="link-node"]:checked');
     
     if (checkboxes.length === 0) {
         showMessage('No nodes selected for linking.', 'error');
@@ -877,36 +877,11 @@ async function handleLinkSelected()
         
         // Re-render the visuals to update stat badges/data and maintain zoom/position
         nodeToFocusId = parentId;
-        // *** CRITICAL FIX: Use loadAndRenderTree for full hierarchy refresh ***
         loadAndRenderTree(); 
-
     } else {
         showMessage('No new links were successfully created.', 'error');
     }
 }
-
-// NEW FUNCTION: Applies colors to the IN/OUT counts based on value (0 or >0)
-function applyStatColors(nodeId) {
-    const inboundSpan = document.getElementById(`inbound-stat-${nodeId}`);
-    const outboundSpan = document.getElementById(`outbound-stat-${nodeId}`);
-    
-    if (inboundSpan) {
-        if (parseInt(inboundSpan.textContent) > 0) {
-            inboundSpan.classList.add('inbound-active');
-        } else {
-            inboundSpan.classList.add('inbound-inactive');
-        }
-    }
-    
-    if (outboundSpan) {
-        if (parseInt(outboundSpan.textContent) > 0) {
-            outboundSpan.classList.add('outbound-active');
-        } else {
-            outboundSpan.classList.add('outbound-inactive');
-        }
-    }
-}
-
 
 // --- NEW FUNCTION: Fetch and Update Click Stats for a single node with retries ---
 async function updateNodeStats(nodeId) {
